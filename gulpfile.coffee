@@ -125,7 +125,7 @@ gulp.task "inject", ->
         "./.tmp/+(modules|components)/**/*.run.js"
         "./.tmp/+(modules|components)/**/*.js"
         "!./.tmp/+(modules|components)/**/tests/*"
-        "!./.tmp/+(modules|components)/**/*.backend.coffee"
+        "!./.tmp/+(modules|components)/**/*.backend.js"
     ], read: false)
 
     return target
@@ -137,6 +137,7 @@ gulp.task "inject", ->
 
 gulp.task "webserver", ->
     process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0" #hackaroo courtesy of https://github.com/request/request/issues/418
+    protocol = if ~config.dev_server.backend.indexOf("https:") then "https:" else "http:"
     return gulp.src([
             TEMP_PATH
             APP_PATH
@@ -152,9 +153,12 @@ gulp.task "webserver", ->
                 {
                     source: "/api/v#{config.api_version}/",
                     target: "#{config.dev_server.backend}/api/v#{config.api_version}/"
-                    options: {
-                        protocol: if ~config.dev_server.backend.indexOf("https:") then "https:" else "http:"
-                    }
+                    options: {protocol}
+                },
+                {
+                    source: "/photo/",
+                    target: "#{config.dev_server.backend}/photo/"
+                    options: {protocol}
                 }
             ]
         ))
