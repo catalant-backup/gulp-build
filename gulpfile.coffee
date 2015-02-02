@@ -403,12 +403,12 @@ gulp.task('make_config', (cb) ->
     fs.writeFile(COMPILE_PATH + "/config.js", template, cb)
 )
 
-gulp.task "update_self", (cb) ->
+gulp.task "update_self", (cb_) ->
     called = false
     callback = ->
         if not called
             called = true
-            cb()
+            cb_()
             
     getRemoteCode = (cb) ->
         remoteCode = ""
@@ -424,14 +424,9 @@ gulp.task "update_self", (cb) ->
             res.on('end', ->
                 cb(null, remoteCode)
             )
-            res.on('error', (err) ->
-                cb(err)
-            )
+   
         )
         req.end()
-        req.on('error', (err) ->
-            cb(err)
-        )
 
     getRemoteCode((err, remoteCode) ->
         if err
