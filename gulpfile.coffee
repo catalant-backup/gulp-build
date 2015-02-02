@@ -403,7 +403,13 @@ gulp.task('make_config', (cb) ->
     fs.writeFile(COMPILE_PATH + "/config.js", template, cb)
 )
 
-gulp.task "update_self", (callback) ->
+gulp.task "update_self", (cb) ->
+    called = false
+    callback = ->
+        if not called
+            called = true
+            cb()
+            
     getRemoteCode = (cb) ->
         remoteCode = ""
         req = https.request({
