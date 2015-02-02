@@ -432,15 +432,16 @@ gulp.task "update_self", (callback) ->
             console.log("Could not self update! remote returned an error: ", err)
             return callback()
             
-        localCode = fs.readFileSync('./gulpfile.coffee')
-        if localCode != remoteCode
+        localCode = fs.readFileSync('./gulpfile.coffee', 'utf8')
+
+        if localCode.length != remoteCode.length
             newName = "./gulpfile.bak#{~~(Math.random() * 100)}.coffee"
             fs.writeFileSync(newName, localCode)
             fs.writeFileSync("./gulpfile.coffee", remoteCode)
             args = process.argv
 
             spawn = require('child_process').spawn
-            console.log("!!!!!!!!!!!!!!!!!!!!!!! SELF UPDATE !!!!!!!!!!!!!!!!!!!!!")
+            console.log("!!!!!!!!!!!!!!!!!!!!!!! SELF UPDATE !!!!!!!!!!!!!!!!!!!!!", localCode.length, remoteCode.length)
             console.log("The contents of your gulpfile dont match github!\nBacking up your gulpfile to #{newName} and updating self.")
             if args.length == 2 #ran gulp without any args
                 console.log("Looks like you are in dev mode, attempting to restart process.")
@@ -452,7 +453,7 @@ gulp.task "update_self", (callback) ->
             callback()
     )
 gulp.task "default", (cb) ->
-    runSequence(['clean:compiled', 'clean:tmp']
+    runSequence(['update_self', 'clean:compiled', 'clean:tmp']
                 'copy_deps'
                 'templates'
                 'make_config'
@@ -462,7 +463,6 @@ gulp.task "default", (cb) ->
                 'inject:version'
                 'bower'
                 'copy_fonts'
-                'update_self'
                 'webserver'
                 'watch'
                 cb)
