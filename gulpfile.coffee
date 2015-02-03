@@ -33,12 +33,17 @@ karma = require('karma').server
 protractor = require("gulp-protractor").protractor
 sprite = require('css-sprite').stream
 
-error_handle = (err) ->
-    console.error err
-    return
+error_handle = (cb) ->
+    handler = (err) ->
+        console.error(err)
+        cb.apply and cb()
+    if cb.apply
+        return handler
+    else
+        handler(cb)
 
 COMPILE_PATH = "./.compiled"            # Compiled JS and CSS, Images, served by webserver
-TEMP_PATH = "./.tmp"                    # hourlynerd dependencies copied over, uncompiled
+TEMP_PATH = ".tmp"                    # hourlynerd dependencies copied over, uncompiled
 APP_PATH = "./app"                      # this module's precompiled CS and SASS
 BOWER_PATH = "./app/bower_components"   # this module's bower dependencies
 DOCS_PATH = './docs'
@@ -64,7 +69,7 @@ paths =
     ]
     fonts: BOWER_PATH + '/**/*.+(woff|woff2|svg|ttf|eot)'
     hn_assets: BOWER_PATH + '/hn-*/app/modules/**/*.*'
-    #images_main: "./app/images/*.+(png|jpg|gif|jpeg)"
+
 
 ngClassifyOptions =
     controller:
@@ -136,9 +141,9 @@ gulp.task "inject", ->
 
     return target
         .pipe(inject(sources,
-            ignorePath: ['.compiled', BOWER_PATH]
+            ignorePath: [".compiled", BOWER_PATH]
             transform:  (filepath) ->
-                filepath = path.normalize(path.join(config.deploy_path, filepath))
+                console.log('filepath:', filepath)
                 return inject.transform.apply(inject.transform, [filepath])
         ))
         .pipe(gulp.dest(COMPILE_PATH))
@@ -187,36 +192,18 @@ gulp.task "webserver", ->
             ],
             middleware: [
                 (req, res, next) ->
-                    if req.url.indexOf(config.web_root) == 0
-                        req.url = req.url.substring(config.web_root.length)
-                    if req.url.indexOf(config.deploy_path) == 0
-                        req.url = req.url.substring(config.deploy_path.length)
-                    req.url = '/' if req.url == ''
+                    req.url = '/' if req.url  == ''
                     next()
             ]
         ))
         .on "error", error_handle
 
 gulp.task "bower", ->
-    prefix = path.join(config.deploy_path, "/")
     return gulp.src(COMPILE_PATH + "/index.html")
         .pipe(wiredep({
             directory: BOWER_PATH
             ignorePath: '../app/'
             exclude: config.bower_exclude
-            fileTypes: {
-                html: {
-                    block: /(([ \t]*)<!--\s*bower:*(\S*)\s*-->)(\n|\r|.)*?(<!--\s*endbower\s*-->)/gi,
-                    detect: {
-                        js: /<script.*src=['"]([^'"]+)/gi,
-                        css: /<link.*href=['"]([^'"]+)/gi
-                    },
-                    replace: {
-                        js: '<script src="'+prefix+'{{filePath}}"></script>',
-                        css: '<link rel="stylesheet" href="'+prefix+'{{filePath}}" />'
-                    }
-                }
-            }
         }))
         .pipe(gulp.dest(COMPILE_PATH))
         .on "error", error_handle
@@ -226,10 +213,9 @@ gulp.task "sass", ->
     return gulp.src(paths.sass)
         .pipe(sourcemaps.init())
         .pipe(sass({
-            includePaths: [ '.tmp/', 'app/bower_components', 'app' ]
+            includePaths: [ TEMP_PATH, BOWER_PATH, APP_PATH ]
             precision: 8
-            onError: (err) ->
-                console.log err
+            onError: error_handle
         }))
         .pipe(sourcemaps.write())
         .pipe(gulp.dest(COMPILE_PATH + "/modules"))
@@ -239,7 +225,7 @@ gulp.task "templates", ->
     return gulp.src(paths.templates)
         .pipe(templateCache("templates.js",
             module: config.app_name
-            root: path.join(config.deploy_path, 'modules')
+            root: 'modules'
         ))
         .pipe(gulp.dest(COMPILE_PATH))
         .on "error", error_handle
@@ -249,10 +235,9 @@ gulp.task "coffee", ->
         .pipe(coffeelint())
         .pipe(coffeelint.reporter())
         .pipe(ngClassify(ngClassifyOptions))
-        .on("error", (err) ->
-            console.error(err)
+        .on("error", error_handle( ->
             this.emit('end')
-        )
+        ))
         .pipe(sourcemaps.init())
         .pipe(coffee())
         .pipe(sourcemaps.write())
@@ -263,7 +248,7 @@ gulp.task "coffee", ->
 gulp.task "copy_deps", ->
     return gulp.src(paths.hn_assets, {
             dot: true
-            base: "./app/bower_components"
+            base: BOWER_PATH
         })
         .pipe(rename( (file) ->
             if file.extname != ''
@@ -276,19 +261,22 @@ gulp.task "copy_deps", ->
         ))
         .pipe(gulp.dest(TEMP_PATH));
 
-gulp.task "copy_fonts", ->
+copyFonts = ->
     return gulp.src(paths.fonts, {
-            dot: true
-            base: "./app/bower_components"
-        }).pipe(rename( (file) ->
-            if file.extname != ''
-                file.dirname = 'ng/fonts'
-                return file
-            else
-                return no
-        ))
-        .pipe(gulp.dest(COMPILE_PATH))
-        .pipe(gulp.dest(DIST_PATH))
+        dot: true
+        base: BOWER_PATH
+    }).pipe(rename( (file) ->
+        if file.extname != ''
+            file.dirname = 'fonts'
+            return file
+        else
+            return no
+    ))
+gulp.task "copy_fonts", ->
+    copyFonts().pipe(gulp.dest(COMPILE_PATH))
+
+gulp.task "copy_fonts:dist", ->
+    copyFonts().pipe(gulp.dest(DIST_PATH))
 
 gulp.task "images", ->
     return gulp.src(paths.images)
@@ -300,25 +288,9 @@ gulp.task "images", ->
         .pipe(gulp.dest(DIST_PATH, cwd: DIST_PATH))
         .on "error", error_handle
 
-
-gulp.task "move_folders", ->
-    return gulp.src([
-            DIST_PATH + "/dist/**"
-        ])
-        .pipe(gulp.dest(DIST_PATH + "/ng/modules"))
-
-gulp.task "delete_things", (cb) ->
-    del([
-        DIST_PATH + "/dist/**"
-    ], cb)
-
 gulp.task "package:dist", ->
     assets = useref.assets()
-    jsRe = RegExp("""<script.*src=["]#{config.deploy_path}/([^"]+)""", 'gi')
-    cssRe = RegExp("""<link.*href=["]#{config.deploy_path}/([^"]+)""", 'gi')
     return gulp.src(COMPILE_PATH + "/index.html")
-        .pipe(replace(jsRe, '<script src="$1'))
-        .pipe(replace(cssRe, '<link rel="stylesheet" href="$1'))
         .pipe(assets)
         .pipe(gulpIf('*.js', ngAnnotate()))
         .pipe(gulpIf('*.js', uglify()))
@@ -413,7 +385,7 @@ gulp.task "update",  ->
         req = https.request({
             host: 'raw.githubusercontent.com',
             port: 443,
-            path: '/HourlyNerd/gulp-build/master/gulpfile.coffee',
+            path: '/HourlyNerd/gulp-build/standalone/gulpfile.coffee',
             method: 'GET'
             agent: false
         }, (res) ->
@@ -467,7 +439,5 @@ gulp.task "build", (cb) ->
                 'inject',
                 'inject:version'
                 'bower'
-                'copy_fonts'
-                'package:dist'
-                'move_folders'
-                'delete_things')
+                'copy_fonts:dist'
+                'package:dist')
