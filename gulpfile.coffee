@@ -403,14 +403,9 @@ gulp.task('make_config', (cb) ->
     fs.writeFile(COMPILE_PATH + "/config.js", template, cb)
 )
 
-gulp.task "update_self", (cb) ->
-    called = false
-    callback = ->
-        if not called
-            called = true
-            cb()
-            
+gulp.task "update",  ->
     getRemoteCode = (cb) ->
+        console.log("Grabbing latest gulpfile from github...")
         remoteCode = ""
         req = https.request({
           host: 'raw.githubusercontent.com',
@@ -422,44 +417,24 @@ gulp.task "update_self", (cb) ->
                 remoteCode += d
             )
             res.on('end', ->
-                cb(null, remoteCode)
-            )
-            res.on('error', (err) ->
-                cb(err)
+                cb(remoteCode)
             )
         )
         req.end()
-        req.on('error', (err) ->
-            cb(err)
-        )
 
-    getRemoteCode((err, remoteCode) ->
-        if err
-            console.log("Could not self update! remote returned an error: ", err)
-            return callback()
-            
+    getRemoteCode((remoteCode) ->
         localCode = fs.readFileSync('./gulpfile.coffee', 'utf8')
-
         if localCode.length != remoteCode.length
-            newName = "./gulpfile.bak#{~~(Math.random() * 100)}.coffee"
+            newName = "./gulpfile_#{~~(Math.random() * 100)}.coffee.bak"
             fs.writeFileSync(newName, localCode)
             fs.writeFileSync("./gulpfile.coffee", remoteCode)
-            args = process.argv
-
-            spawn = require('child_process').spawn
             console.log("!!!!!!!!!!!!!!!!!!!!!!! SELF UPDATE !!!!!!!!!!!!!!!!!!!!!", localCode.length, remoteCode.length)
             console.log("The contents of your gulpfile dont match github!\nBacking up your gulpfile to #{newName} and updating self.")
-            if args.length == 2 #ran gulp without any args
-                console.log("Looks like you are in dev mode, attempting to restart process.")
-                spawn('gulp', [], {stdio: 'inherit'})
-            else
-                console.log("Looks like you are doing a prod build, Im going to kill this and you will have to re-build. sorry!")
-                process.exit(0)
         else
-            callback()
+            console.log("Your gulpfile matches remote. No update required.")
     )
 gulp.task "default", (cb) ->
-    runSequence(['update_self', 'clean:compiled', 'clean:tmp']
+    runSequence(['clean:compiled', 'clean:tmp']
                 'copy_deps'
                 'templates'
                 'make_config'
