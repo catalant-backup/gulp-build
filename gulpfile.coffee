@@ -43,7 +43,7 @@ error_handle = (cb) ->
         handler(cb)
 
 COMPILE_PATH = "./.compiled"            # Compiled JS and CSS, Images, served by webserver
-TEMP_PATH = ".tmp"                    # hourlynerd dependencies copied over, uncompiled
+TEMP_PATH = "./.tmp"                    # hourlynerd dependencies copied over, uncompiled
 APP_PATH = "./app"                      # this module's precompiled CS and SASS
 BOWER_PATH = "./app/bower_components"   # this module's bower dependencies
 DOCS_PATH = './docs'
@@ -143,7 +143,6 @@ gulp.task "inject", ->
         .pipe(inject(sources,
             ignorePath: [".compiled", BOWER_PATH]
             transform:  (filepath) ->
-                console.log('filepath:', filepath)
                 return inject.transform.apply(inject.transform, [filepath])
         ))
         .pipe(gulp.dest(COMPILE_PATH))
