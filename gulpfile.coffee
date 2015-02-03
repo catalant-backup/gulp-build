@@ -93,7 +93,7 @@ gulp.task('watch', ->
         runSequence('inject', 'bower')
     )
     watch(paths.hn_assets, ->
-        runSequence('clean:tmp', 'clean:compiled', 'inject', 'inject:version', 'copy_deps', ['coffee', 'sass'])
+        runSequence('clean:tmp', 'clean:compiled', 'make_config', 'inject', 'inject:version', 'copy_deps', ['coffee', 'sass'])
     )
 )
 
@@ -401,6 +401,8 @@ gulp.task('make_config', (cb) ->
         angular.module('appConfig', [])
             .constant('APP_CONFIG', #{constant});
     """
+    if not fs.existsSync(COMPILE_PATH)
+        fs.mkdirSync(COMPILE_PATH)
     fs.writeFile(COMPILE_PATH + "/config.js", template, cb)
 )
 
@@ -426,8 +428,11 @@ gulp.task "update",  ->
     getRemoteCode((remoteCode) ->
         localCode = fs.readFileSync('./gulpfile.coffee', 'utf8')
         if localCode.length != remoteCode.length
+            newName = "./gulpfile_#{~~(Math.random() * 100)}.coffee.bak"
+            fs.writeFileSync(newName, localCode)
             fs.writeFileSync("./gulpfile.coffee", remoteCode)
-            console.log("The contents of your gulpfile dont match the latest. Updating gulpfile...")
+            console.log("!!!!!!!!!!!!!!!!!!!!!!! SELF UPDATE !!!!!!!!!!!!!!!!!!!!!", localCode.length, remoteCode.length)
+            console.log("The contents of your gulpfile dont match github!\nBacking up your gulpfile to #{newName} and updating self.")
         else
             console.log("Your gulpfile matches remote. No update required.")
     )
