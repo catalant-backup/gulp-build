@@ -191,6 +191,7 @@ gulp.task "webserver", ->
                         req.url = req.url.substring(config.web_root.length)
                     if req.url.indexOf(config.deploy_path) == 0
                         req.url = req.url.substring(config.deploy_path.length)
+                    req.url = '/' if req.url == ''
                     next()
             ]
         ))
