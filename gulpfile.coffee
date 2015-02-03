@@ -426,11 +426,8 @@ gulp.task "update",  ->
     getRemoteCode((remoteCode) ->
         localCode = fs.readFileSync('./gulpfile.coffee', 'utf8')
         if localCode.length != remoteCode.length
-            newName = "./gulpfile_#{~~(Math.random() * 100)}.coffee.bak"
-            fs.writeFileSync(newName, localCode)
             fs.writeFileSync("./gulpfile.coffee", remoteCode)
-            console.log("!!!!!!!!!!!!!!!!!!!!!!! SELF UPDATE !!!!!!!!!!!!!!!!!!!!!", localCode.length, remoteCode.length)
-            console.log("The contents of your gulpfile dont match github!\nBacking up your gulpfile to #{newName} and updating self.")
+            console.log("The contents of your gulpfile dont match the latest. Updating gulpfile...")
         else
             console.log("Your gulpfile matches remote. No update required.")
     )
