@@ -84,7 +84,7 @@ gulp.task('watch', ->
         runSequence('coffee', 'inject', 'bower')
     )
     watch(BOWER_PATH, ->
-        runSequence('bower', 'inject', 'bower')
+        runSequence('inject', 'bower')
     )
     watch(paths.templates, ->
         runSequence('templates', 'inject', 'bower')
