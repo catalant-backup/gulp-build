@@ -33,14 +33,8 @@ karma = require('karma').server
 protractor = require("gulp-protractor").protractor
 sprite = require('css-sprite').stream
 
-error_handle = (cb) ->
-    handler = (err) ->
-        console.error(err)
-        cb.apply and cb()
-    if cb.apply
-        return handler
-    else
-        handler(cb)
+error_handle = (err) ->
+    console.log(err)
 
 COMPILE_PATH = "./.compiled"            # Compiled JS and CSS, Images, served by webserver
 TEMP_PATH = "./.tmp"                    # hourlynerd dependencies copied over, uncompiled
@@ -56,8 +50,8 @@ paths =
         "./.tmp/modules/**/*.scss"
     ]
     templates: [
-        "./app/modules/**/views/*.html"
-        "./.tmp/modules/**/views/*.html"
+        "./app/modules/**/*.html"
+        "./.tmp/modules/**/*.html"
     ]
     coffee: [
         "./app/modules/**/*.coffee"
@@ -212,9 +206,10 @@ gulp.task "sass", ->
     return gulp.src(paths.sass)
         .pipe(sourcemaps.init())
         .pipe(sass({
-            includePaths: [ TEMP_PATH, BOWER_PATH, APP_PATH ]
+            includePaths: [ '.tmp/', 'app/bower_components', 'app' ]
             precision: 8
-            onError: error_handle
+            onError: (err) ->
+                console.log err
         }))
         .pipe(sourcemaps.write())
         .pipe(gulp.dest(COMPILE_PATH + "/modules"))
@@ -224,7 +219,7 @@ gulp.task "templates", ->
     return gulp.src(paths.templates)
         .pipe(templateCache("templates.js",
             module: config.app_name
-            root: 'modules'
+            root: '/modules'
         ))
         .pipe(gulp.dest(COMPILE_PATH))
         .on "error", error_handle
@@ -234,9 +229,9 @@ gulp.task "coffee", ->
         .pipe(coffeelint())
         .pipe(coffeelint.reporter())
         .pipe(ngClassify(ngClassifyOptions))
-        .on("error", error_handle( ->
-            this.emit('end')
-        ))
+        .on("error", (err) ->
+            console.error(err)
+        )
         .pipe(sourcemaps.init())
         .pipe(coffee())
         .pipe(sourcemaps.write())
