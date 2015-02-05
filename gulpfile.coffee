@@ -400,6 +400,7 @@ gulp.task "update",  ->
         else
             console.log("Your gulpfile matches latest. No update required.")
     )
+
 gulp.task "default", (cb) ->
     runSequence(['clean:compiled', 'clean:tmp']
                 'copy_deps'
@@ -435,3 +436,7 @@ gulp.task "build", (cb) ->
                 'bower'
                 'copy_fonts:dist'
                 'package:dist')
+
+if fs.existsSync('./custom_gulp_tasks.coffee')
+    require('./custom_gulp_tasks.coffee')(gulp)
+
