@@ -353,13 +353,16 @@ gulp.task('sprite', ->
     .pipe(gulp.dest(TEMP_PATH))
 )
 
-gulp.task('make_config', (cb) ->
+makeConfig = (isDebug, cb) ->
     configs = glob.sync(BOWER_PATH+"/**/bower.json")
     versions = {}
     configs.forEach((cpath)->
       c = require(cpath)
       versions[c.name] = c.version
     )
+    bwr = require(path.join(__dirname, './bower.json'))
+    config.app_version = bwr.version
+    config.app_debug = isDebug
     config.bower_versions = versions
     config.build_date = new Date()
     constant = JSON.stringify(config)
@@ -370,6 +373,13 @@ gulp.task('make_config', (cb) ->
     if not fs.existsSync(COMPILE_PATH)
         fs.mkdirSync(COMPILE_PATH)
     fs.writeFile(COMPILE_PATH + "/config.js", template, cb)
+
+gulp.task('make_config', (cb) ->
+    makeConfig(true, cb)
+)
+
+gulp.task('make_config:dist', (cb) ->
+    makeConfig(false, cb)
 )
 
 gulp.task "update",  ->
@@ -427,7 +437,7 @@ gulp.task "build", (cb) ->
     runSequence(['clean:dist', 'clean:compiled', 'clean:tmp']
                 'copy_deps'
                 'templates'
-                'make_config'
+                'make_config:dist'
                 'sprite'
                 ['coffee', 'sass']
                 'images'
