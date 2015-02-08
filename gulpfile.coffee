@@ -43,24 +43,39 @@ BOWER_PATH = "./app/bower_components"   # this module's bower dependencies
 DOCS_PATH = './docs'
 DIST_PATH = './dist'
 
+dedupeGlobs = (globs, root="/modules") ->
+    #expand globs arrays, dedupe paths after 'root' in order of arrival. return a new glob array ignoring dupes
+    deduper = {}
+    ignorePaths = []
+    re = RegExp("^.*?"+root)
+    globs.forEach((glb) ->
+        glob.sync(glb).forEach((p) ->
+            d = p.replace(re, "")
+            if not deduper[d]
+                deduper[d] = true
+            else
+                ignorePaths.push("!"+p)
+        )
+    )
+    return globs.concat(ignorePaths)
 
 paths =
-    sass: [
+    sass: dedupeGlobs([
         "./app/modules/**/*.scss"
         "./.tmp/modules/**/*.scss"
-    ]
-    templates: [
+    ])
+    templates: dedupeGlobs([
         "./app/modules/**/*.html"
         "./.tmp/modules/**/*.html"
-    ]
-    coffee: [
+    ])
+    coffee: dedupeGlobs([
         "./app/modules/**/*.coffee"
         "./.tmp/modules/**/*.coffee"
-    ]
-    images: [
+    ])
+    images: dedupeGlobs([
         "./app/modules/**/images/*.+(png|jpg|gif|jpeg)"
         "./.tmp/modules/**/images/*.+(png|jpg|gif|jpeg)"
-    ]
+    ])
     fonts: BOWER_PATH + '/**/*.+(woff|woff2|svg|ttf|eot)'
     hn_assets: BOWER_PATH + '/hn-*/app/modules/**/*.*'
 
