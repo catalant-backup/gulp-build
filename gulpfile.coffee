@@ -32,6 +32,8 @@ imageop = require('gulp-image-optimization')
 karma = require('karma').server
 protractor = require("gulp-protractor").protractor
 sprite = require('css-sprite').stream
+rev = require('gulp-rev')
+revReplace = require('gulp-rev-replace')
 
 error_handle = (err) ->
     console.error err
@@ -51,8 +53,8 @@ paths =
         "./.tmp/modules/**/*.scss"
     ]
     templates: [
-        "./app/modules/**/views/*.html"
-        "./.tmp/modules/**/views/*.html"
+        "./app/modules/**/*.html"
+        "./.tmp/modules/**/*.html"
     ]
     coffee: [
         "./app/modules/**/*.coffee"
@@ -323,8 +325,10 @@ gulp.task "package:dist", ->
         .pipe(gulpIf('*.js', ngAnnotate()))
         .pipe(gulpIf('*.js', uglify()))
         .pipe(gulpIf('*.css', minifyCss()))
+        .pipe(rev())
         .pipe(assets.restore())
         .pipe(useref())
+        .pipe(revReplace())
         .pipe(gulp.dest(DIST_PATH))
         .on "error", error_handle
 
