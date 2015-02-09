@@ -176,6 +176,7 @@ gulp.task('inject:version', ->
 gulp.task "webserver", ->
     process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0" #hackaroo courtesy of https://github.com/request/request/issues/418
     protocol = if ~config.dev_server.backend.indexOf("https:") then "https:" else "http:"
+    token = config.app_token
     return gulp.src([
             COMPILE_PATH
             TEMP_PATH
@@ -192,7 +193,7 @@ gulp.task "webserver", ->
                 {
                     source: "/api/v#{config.api_version}/",
                     target: "#{config.dev_server.backend}/api/v#{config.api_version}/"
-                    options: {protocol}
+                    options: {protocol, headers: {'X-App-Token': token}}
                 },
                 {
                     source: "/photo/",
@@ -380,14 +381,15 @@ makeConfig = (isDebug, cb) ->
       versions[c.name] = c.version
     )
     bwr = require(path.join(__dirname, './bower.json'))
-    config.app_version = bwr.version
-    config.app_debug = isDebug
-    config.bower_versions = versions
-    config.build_date = new Date()
-    constant = JSON.stringify(config)
+    cfg = require(path.join(__dirname, './config.json'))
+    cfg.app_version = bwr.version
+    cfg.app_debug = isDebug
+    cfg.bower_versions = versions
+    cfg.build_date = new Date()
+    delete cfg.app_token # shhhh super secret! don't tell anyone!
     template = """
         angular.module('appConfig', [])
-            .constant('APP_CONFIG', #{constant});
+            .constant('APP_CONFIG', #{JSON.stringify(cfg)});
     """
     if not fs.existsSync(COMPILE_PATH)
         fs.mkdirSync(COMPILE_PATH)
