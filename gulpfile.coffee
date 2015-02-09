@@ -241,7 +241,7 @@ gulp.task "templates", ->
     return gulp.src(paths.templates)
         .pipe(templateCache("templates.js",
             module: config.app_name
-            root: path.join(config.deploy_path, 'modules')
+            root: path.join('/modules')
         ))
         .pipe(gulp.dest(COMPILE_PATH))
         .on "error", error_handle
