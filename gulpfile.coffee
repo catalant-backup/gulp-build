@@ -34,6 +34,7 @@ protractor = require("gulp-protractor").protractor
 sprite = require('css-sprite').stream
 rev = require('gulp-rev')
 revReplace = require('gulp-rev-replace')
+_ = require("underscore")
 
 error_handle = (err) ->
     console.log(err)
@@ -175,8 +176,18 @@ gulp.task('inject:version', ->
 
 gulp.task "webserver", ->
     process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0" #hackaroo courtesy of https://github.com/request/request/issues/418
-    protocol = if ~config.dev_server.backend.indexOf("https:") then "https:" else "http:"
-    token = config.app_token
+    backend = config.backends[config.dev_server.backend]
+    apiVersion = backend.api_version
+
+    makeProxy = (url) ->
+        return {
+            source: url,
+            target: "#{backend.host}#{url}"
+            options: {
+                protocol: "https:"
+                headers: {'X-App-Token': backend.app_token}
+            }
+        }
     return gulp.src([
             COMPILE_PATH
             TEMP_PATH
@@ -190,16 +201,8 @@ gulp.task "webserver", ->
                 enabled: true
                 path: COMPILE_PATH
             proxies: [
-                {
-                    source: "/api/v#{config.api_version}/",
-                    target: "#{config.dev_server.backend}/api/v#{config.api_version}/"
-                    options: {protocol, headers: {'X-App-Token': token}}
-                },
-                {
-                    source: "/photo/",
-                    target: "#{config.dev_server.backend}/photo/"
-                    options: {protocol}
-                }
+                makeProxy("/api/v#{apiVersion}/")
+                makeProxy("/photo/")
             ],
             middleware: [
                 (req, res, next) ->
@@ -213,7 +216,7 @@ gulp.task "bower", ->
     return gulp.src(COMPILE_PATH + "/index.html")
         .pipe(wiredep({
             directory: BOWER_PATH
-            ignorePath: '../app/'
+            ignorePath: '../app'
             exclude: config.bower_exclude
         }))
         .pipe(gulp.dest(COMPILE_PATH))
@@ -273,22 +276,24 @@ gulp.task "copy_deps", ->
         ))
         .pipe(gulp.dest(TEMP_PATH));
 
-copyFonts = ->
-    return gulp.src(paths.fonts, {
-        dot: true
-        base: BOWER_PATH
-    }).pipe(rename( (file) ->
-        if file.extname != ''
-            file.dirname = 'fonts'
-            return file
-        else
-            return no
-    ))
-gulp.task "copy_fonts", ->
-    copyFonts().pipe(gulp.dest(COMPILE_PATH))
+copyExtras = (types..., dest) ->
+    types.forEach((type) ->
+        gulp.src(paths[type], {
+            dot: true
+            base: BOWER_PATH
+        }).pipe(rename((file) ->
+            if file.extname != ''
+                file.dirname = type
+                return file
+            else
+                return no
+        )).pipe(gulp.dest(dest))
+    )
+gulp.task "copy_extras", ->
+    copyExtras('fonts', 'runtimes', COMPILE_PATH)
 
-gulp.task "copy_fonts:dist", ->
-    copyFonts().pipe(gulp.dest(DIST_PATH))
+gulp.task "copy_extras:dist", ->
+    copyExtras('fonts', 'runtimes', DIST_PATH)
 
 gulp.task "images", ->
     return gulp.src(paths.images)
@@ -381,12 +386,16 @@ makeConfig = (isDebug, cb) ->
       versions[c.name] = c.version
     )
     bwr = require(path.join(__dirname, './bower.json'))
-    cfg = require(path.join(__dirname, './config.json'))
+    cfg = _.extend({}, require(path.join(__dirname, './config.json')))
+    backend = cfg.backends[config.dev_server.backend]
+
+    cfg.api_version = backend.api_version
     cfg.app_version = bwr.version
+    cfg.app_id = backend.app_id
     cfg.app_debug = isDebug
     cfg.bower_versions = versions
     cfg.build_date = new Date()
-    delete cfg.app_token # shhhh super secret! don't tell anyone!
+    delete cfg.backends # shhhh super secret! don't tell anyone!
     template = """
         angular.module('appConfig', [])
             .constant('APP_CONFIG', #{JSON.stringify(cfg)});
@@ -470,4 +479,3 @@ gulp.task "build", (cb) ->
 
 if fs.existsSync('./custom_gulp_tasks.coffee')
     require('./custom_gulp_tasks.coffee')(gulp)
-
