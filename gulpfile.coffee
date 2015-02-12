@@ -80,6 +80,7 @@ paths =
         "./.tmp/modules/**/images/*.+(png|jpg|gif|jpeg)"
     ])
     fonts: BOWER_PATH + '/**/*.+(woff|woff2|svg|ttf|eot)'
+    runtimes: BOWER_PATH + '/**/*.+(xap|swf)'
     hn_assets: BOWER_PATH + '/hn-*/app/modules/**/*.*'
 
 
@@ -451,7 +452,7 @@ gulp.task "default", (cb) ->
                 'inject',
                 'inject:version'
                 'bower'
-                'copy_fonts'
+                'copy_extras'
                 'webserver'
                 'watch'
                 cb)
@@ -474,7 +475,7 @@ gulp.task "build", (cb) ->
                 'inject',
                 'inject:version'
                 'bower'
-                'copy_fonts:dist'
+                'copy_extras:dist'
                 'package:dist')
 
 if fs.existsSync('./custom_gulp_tasks.coffee')
