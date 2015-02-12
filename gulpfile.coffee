@@ -34,6 +34,7 @@ protractor = require("gulp-protractor").protractor
 sprite = require('css-sprite').stream
 rev = require('gulp-rev')
 revReplace = require('gulp-rev-replace')
+_ = require('underscore')
 
 error_handle = (err) ->
     console.error err
@@ -159,10 +160,20 @@ gulp.task('inject:version', ->
         .pipe(gulp.dest(COMPILE_PATH))
         .on "error", error_handle
 )
-
 gulp.task "webserver", ->
     process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0" #hackaroo courtesy of https://github.com/request/request/issues/418
-    protocol = if ~config.dev_server.backend.indexOf("https:") then "https:" else "http:"
+    backend = config.backends[config.dev_server.backend]
+    apiVersion = backend.api_version
+
+    makeProxy = (url) ->
+        return {
+            source: url,
+            target: "#{backend.host}#{url}"
+            options: {
+                protocol: "https:"
+                headers: {'X-App-Token': backend.app_token}
+            }
+        }
     return gulp.src([
             COMPILE_PATH
             TEMP_PATH
@@ -176,16 +187,8 @@ gulp.task "webserver", ->
                 enabled: true
                 path: COMPILE_PATH
             proxies: [
-                {
-                    source: "/api/v#{config.api_version}/",
-                    target: "#{config.dev_server.backend}/api/v#{config.api_version}/"
-                    options: {protocol}
-                },
-                {
-                    source: "/photo/",
-                    target: "#{config.dev_server.backend}/photo/"
-                    options: {protocol}
-                }
+                makeProxy("/api/v#{apiVersion}/")
+                makeProxy("/photo/")
             ],
             middleware: [
                 (req, res, next) ->
@@ -391,24 +394,40 @@ gulp.task('sprite', ->
     .pipe(gulp.dest(TEMP_PATH))
 )
 
-gulp.task('make_config', (cb) ->
+makeConfig = (isDebug, cb) ->
     configs = glob.sync(BOWER_PATH+"/**/bower.json")
     versions = {}
     configs.forEach((cpath)->
       c = require(cpath)
       versions[c.name] = c.version
     )
-    config.bower_versions = versions
-    config.build_date = new Date()
-    constant = JSON.stringify(config)
+    bwr = require(path.join(__dirname, './bower.json'))
+    cfg = _.extend({}, require(path.join(__dirname, './config.json')))
+    backend = cfg.backends[config.dev_server.backend]
+
+    cfg.api_version = backend.api_version
+    cfg.app_version = bwr.version
+    cfg.app_id = backend.app_id
+    cfg.app_debug = isDebug
+    cfg.bower_versions = versions
+    cfg.build_date = new Date()
+    delete cfg.backends
     template = """
         angular.module('appConfig', [])
-            .constant('APP_CONFIG', #{constant});
+            .constant('APP_CONFIG', #{JSON.stringify(cfg)});
     """
     if not fs.existsSync(COMPILE_PATH)
         fs.mkdirSync(COMPILE_PATH)
     fs.writeFile(COMPILE_PATH + "/config.js", template, cb)
+
+gulp.task('make_config', (cb) ->
+    makeConfig(true, cb)
 )
+
+gulp.task('make_config:dist', (cb) ->
+    makeConfig(false, cb)
+)
+
 
 gulp.task "update",  ->
     getRemoteCode = (cb) ->
@@ -464,7 +483,7 @@ gulp.task "build", (cb) ->
     runSequence(['clean:dist', 'clean:compiled', 'clean:tmp']
                 'copy_deps'
                 'templates'
-                'make_config'
+                'make_config:dist'
                 'sprite'
                 ['coffee', 'sass']
                 'images'
