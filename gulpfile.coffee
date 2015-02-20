@@ -63,25 +63,25 @@ dedupeGlobs = (globs, root="/modules") ->
     return globs.concat(ignorePaths)
 
 paths =
-    sass: dedupeGlobs([
+    sass: [
         "./app/modules/**/*.scss"
         "./.tmp/modules/**/*.scss"
-    ])
-    templates: dedupeGlobs([
+    ]
+    templates: [
         "./app/modules/**/*.html"
         "./.tmp/modules/**/*.html"
-    ])
-    coffee: dedupeGlobs([
+    ]
+    coffee: [
         "./app/modules/**/*.coffee"
         "./.tmp/modules/**/*.coffee"
-    ])
-    images: dedupeGlobs([
+    ]
+    images: [
         "./app/modules/**/images/*.+(png|jpg|gif|jpeg)"
         "./.tmp/modules/**/images/*.+(png|jpg|gif|jpeg)"
-    ])
+    ]
     fonts: BOWER_PATH + '/**/*.+(woff|woff2|svg|ttf|eot)'
     runtimes: BOWER_PATH + '/**/*.+(xap|swf)'
-    hn_assets: BOWER_PATH + '/hn-*/app/modules/**/*.*'
+    assets: BOWER_PATH + '/hn-*/app/modules/**/*.*'
 
 
 ngClassifyOptions =
@@ -94,7 +94,7 @@ ngClassifyOptions =
     provider:
         suffix: ''
 
-gulp.task('watch', ->
+gulp.task 'watch', ->
     watch(paths.sass, ->
         runSequence('sass', 'inject', 'bower')
     )
@@ -110,26 +110,36 @@ gulp.task('watch', ->
     watch(APP_PATH+'/index.html', ->
         runSequence('inject', 'bower')
     )
-    watch(paths.hn_assets, ->
-        runSequence('clean:tmp', 'clean:compiled', 'make_config', 'inject', 'inject:version', 'copy_deps', ['coffee', 'sass'])
+    watch(paths.assets, ->
+        runSequence(#'clean:tmp',
+#                    'clean:compiled',
+                    'copy_deps'
+#                    'templates'
+#                    'make_config'
+#                    'sprite'
+                    ['coffee', 'sass']
+                    'inject',
+#                    'inject:version'
+                    'bower'
+#                    'copy_extras'
+        )
     )
-)
 
-gulp.task "clean:compiled", (cb) ->
+gulp.task "clean:compiled",  ->
     return gulp.src(COMPILE_PATH)
         .pipe(vinylPaths(del))
 
-gulp.task "clean:tmp", (cb) ->
+gulp.task "clean:tmp",  ->
     return gulp.src(TEMP_PATH)
         .pipe(vinylPaths(del))
 
 
-gulp.task "clean:docs", (cb) ->
+gulp.task "clean:docs",  ->
     return gulp.src(DOCS_PATH)
         .pipe(vinylPaths(del))
 
 
-gulp.task "clean:dist", (cb) ->
+gulp.task "clean:dist",  ->
     return gulp.src(DIST_PATH)
         .pipe(vinylPaths(del))
 
@@ -225,7 +235,7 @@ gulp.task "bower", ->
 
 
 gulp.task "sass", ->
-    return gulp.src(paths.sass)
+    return gulp.src(dedupeGlobs(paths.sass))
         .pipe(sourcemaps.init())
         .pipe(sass({
             includePaths: [ '.tmp/', 'app/bower_components', 'app' ]
@@ -238,7 +248,7 @@ gulp.task "sass", ->
         .on("error", error_handle)
 
 gulp.task "templates", ->
-    return gulp.src(paths.templates)
+    return gulp.src(dedupeGlobs(paths.templates))
         .pipe(templateCache("templates.js",
             module: config.app_name
             root: '/modules'
@@ -247,7 +257,7 @@ gulp.task "templates", ->
         .on "error", error_handle
 
 gulp.task "coffee", ->
-    return gulp.src(paths.coffee)
+    return gulp.src(dedupeGlobs(paths.coffee))
         .pipe(coffeelint())
         .pipe(coffeelint.reporter())
         .pipe(ngClassify(ngClassifyOptions))
@@ -262,7 +272,7 @@ gulp.task "coffee", ->
         .on "error", error_handle
 
 gulp.task "copy_deps", ->
-    return gulp.src(paths.hn_assets, {
+    return gulp.src(paths.assets, {
             dot: true
             base: BOWER_PATH
         })
@@ -297,7 +307,7 @@ gulp.task "copy_extras:dist", ->
     copyExtras('fonts', 'runtimes', DIST_PATH)
 
 gulp.task "images", ->
-    return gulp.src(paths.images)
+    return gulp.src(dedupeGlobs(paths.images))
         .pipe(imageop({
             optimizationLevel: 5
             progressive: true
@@ -311,7 +321,7 @@ gulp.task "package:dist", ->
     return gulp.src(COMPILE_PATH + "/index.html")
         .pipe(assets)
         .pipe(gulpIf('*.js', ngAnnotate()))
-        .pipe(gulpIf('*.js', uglify()))
+    #    .pipe(gulpIf('*.js', uglify()))
         .pipe(gulpIf('*.css', minifyCss()))
         .pipe(rev())
         .pipe(assets.restore())
@@ -321,7 +331,7 @@ gulp.task "package:dist", ->
         .on "error", error_handle
 
 gulp.task "docs", ['clean:docs'], ->
-    return gulp.src(paths.coffee)
+    return gulp.src(dedupeGlobs(paths.coffee))
         .pipe(yuidoc({
             project:
                 name: config.app_name + " Documentation"
@@ -368,7 +378,7 @@ gulp.task('e2e', (cb) ->
 # See .tmp/sprite.scss after compilation step to see variable names.
 # Variable name = $[module_name]-images-[filename_underscore_separated]
 gulp.task('sprite', ->
-    return gulp.src(paths.images)
+    return gulp.src(dedupeGlobs(paths.images))
     .pipe(sprite({
         name: "sprite"
         style: "sprite.scss"
