@@ -47,6 +47,8 @@ BOWER_PATH = "./app/bower_components"   # this module's bower dependencies
 DOCS_PATH = './docs'
 DIST_PATH = './dist'
 
+if '--staging' in process.argv
+    config.dev_server.backend = 'staging'
 
 paths =
     sass: [
