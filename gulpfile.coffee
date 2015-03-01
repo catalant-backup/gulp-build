@@ -247,6 +247,9 @@ gulp.task "templates", ->
         .pipe(templateCache("templates.js",
             module: config.app_name
             root: path.join('/modules')
+            htmlmin:
+                removeComments: true
+                maxLineLength: 100
         ))
         .pipe(gulp.dest(COMPILE_PATH))
         .on "error", error_handle
