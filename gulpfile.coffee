@@ -274,6 +274,7 @@ gulp.task "coffee", ->
         .pipe(coffee())
         .pipe(sourcemaps.write())
         .pipe(ngAnnotate())
+#        .pipe(gulpIf('*.js', uglify())) # makes it easy to test minification issues
         .pipe(gulp.dest(COMPILE_PATH + "/modules"))
         .on "error", error_handle
 
@@ -327,7 +328,7 @@ gulp.task "package:dist", ->
     return gulp.src(COMPILE_PATH + "/index.html")
         .pipe(assets)
         .pipe(gulpIf('*.js', ngAnnotate()))
-    #    .pipe(gulpIf('*.js', uglify()))
+        .pipe(gulpIf('*.js', uglify()))
         .pipe(gulpIf('*.css', minifyCss()))
         .pipe(rev())
         .pipe(assets.restore())
