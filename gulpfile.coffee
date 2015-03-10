@@ -256,16 +256,16 @@ gulp.task "templates", ->
 
 gulp.task "coffee", ->
     return gulp.src(paths.coffee)
-        .pipe(coffeelint())
-        .pipe(coffeelint.reporter())
+ #       .pipe(coffeelint())
+ #       .pipe(coffeelint.reporter())
         .pipe(ngClassify(ngClassifyOptions))
         .on("error", (err) ->
             console.error(err)
             this.emit('end')
         )
-        .pipe(sourcemaps.init())
+#        .pipe(sourcemaps.init())
         .pipe(coffee())
-        .pipe(sourcemaps.write())
+#        .pipe(sourcemaps.write())
         .pipe(ngAnnotate())
         .pipe(gulp.dest(COMPILE_PATH + "/modules"))
         .on "error", error_handle
@@ -499,3 +499,6 @@ gulp.task "build", (cb) ->
                 'package:dist'
                 'move_folders'
                 'delete_things')
+
+if fs.existsSync('./custom_gulp_tasks.coffee')
+    require('./custom_gulp_tasks.coffee')(gulp)
