@@ -1,6 +1,7 @@
 config = require('./config.json')
 fs = require('fs')
 https = require('https')
+httpProxy = require('http-proxy')
 path = require('path')
 gulp = require("gulp")
 glob = require("glob")
@@ -35,12 +36,33 @@ sprite = require('css-sprite').stream
 rev = require('gulp-rev')
 revReplace = require('gulp-rev-replace')
 _ = require("underscore")
+header = require('gulp-header')
+plumber = require('gulp-plumber')
+gutil = require('gulp-util')
+lazypipe = require('lazypipe')
+express = require('express')
+
+gulp_src = gulp.src
+
+gulp.src = ->
+  gulp_src.apply(gulp, arguments).pipe(plumber((error) ->
+    # Output an error message
+    gutil.log gutil.colors.red('Error (' + error.plugin + '): ' + error.message)
+    # emit the end event, to properly end the task
+    @emit 'end'
+    return
+  ))
+
+LOG_PROXY_HEADERS = false
+isProdBuild = false
 
 if '--staging' in process.argv
     config.dev_server.backend = 'staging'
-    
-error_handle = (err) ->
-    console.log(err)
+
+
+if '--prod' in process.argv
+    isProdBuild = true
+
 
 COMPILE_PATH = "./.compiled"            # Compiled JS and CSS, Images, served by webserver
 TEMP_PATH = "./.tmp"                    # hourlynerd dependencies copied over, uncompiled
@@ -65,6 +87,17 @@ dedupeGlobs = (globs, root="/modules") ->
     )
     return globs.concat(ignorePaths)
 
+
+ngClassifyOptions =
+    controller:
+        format: 'upperCamelCase'
+        suffix: 'Controller'
+    constant:
+        format: '*' #unchanged
+    appName: config.app_name
+    provider:
+        suffix: ''
+
 paths =
     sass: [
         "./app/modules/**/*.scss"
@@ -86,47 +119,71 @@ paths =
     runtimes: BOWER_PATH + '/**/*.+(xap|swf)'
     assets: BOWER_PATH + '/hn-*/app/modules/**/*.*'
 
+pipes = {
+    coffee:
+        lazypipe()
+            .pipe(ngClassify, ngClassifyOptions)
+            .pipe(coffee)
+            .pipe(ngAnnotate)
+            .pipe(gulp.dest, path.join(COMPILE_PATH, "modules"))
+    coffeeLint:
+        lazypipe()
+            .pipe(coffeelint)
+            .pipe(coffeelint.reporter)
+            .pipe(gulp.dest, path.join(COMPILE_PATH, "modules"))
+    sass:
+        lazypipe()
+            .pipe(sourcemaps.init)
+            .pipe(sass, {
+                includePaths: ['.tmp/', 'app/bower_components', 'app']
+                precision: 8
+            })
+            .pipe(sourcemaps.write)
+            .pipe(gulp.dest, path.join(COMPILE_PATH, "modules"))
+}
 
-ngClassifyOptions =
-    controller:
-        format: 'upperCamelCase'
-        suffix: 'Controller'
-    constant:
-        format: '*' #unchanged
-    appName: config.app_name
-    provider:
-        suffix: ''
 
-gulp.task 'watch', ->
-    watch(paths.sass, ->
-        runSequence('sass', 'inject', 'bower')
-    )
-    watch(paths.coffee, (event) ->
-        runSequence('coffee', 'inject', 'bower')
-    )
-    watch(BOWER_PATH, ->
-        runSequence('inject', 'bower')
-    )
-    watch(paths.templates, ->
-        runSequence('templates', 'inject', 'bower')
-    )
+gulp.task 'watch', (cb) ->
     watch(APP_PATH+'/index.html', ->
         runSequence('inject', 'bower')
     )
-    watch(paths.assets, ->
-        runSequence(#'clean:tmp',
-#                    'clean:compiled',
-                    'copy_deps'
-#                    'templates'
-#                    'make_config'
-#                    'sprite'
-                    ['coffee', 'sass']
-                    'inject',
-#                    'inject:version'
-                    'bower'
-#                    'copy_extras'
-        )
+    types = '/**/*.+(js|css|coffee|html|scss)'
+    assets = [APP_PATH+"/modules"+types]
+
+    _.each(glob.sync(path.join(BOWER_PATH, 'hn-*')), (p) ->
+        resolved = fs.realpathSync(p)
+        if resolved != p
+            assets.push(path.join(resolved, 'app/modules'+types))
     )
+
+    watch(assets , followSymlinks: false, (v) ->
+        tasks = []
+        pre = (cb) ->
+            cb()
+        ext = path.extname(v.path).toLowerCase()
+        if ext == '.scss'
+            tasks = ['sass', 'inject', 'bower']
+        if ext == '.coffee'
+            tasks = ['coffee', 'inject', 'bower']
+        if ext == '.html'
+            tasks = ['templates']
+        assetPath = v.path
+        if v.path.indexOf(__dirname) != 0 # this path comes from within the bower components dir
+            pre = (cb) ->
+                assetPath = v.path.replace(/^.*?\/app\//, TEMP_PATH+"/") # gets put here next
+                copyDeps(gulp.src(v.path, {
+                    dot: true
+                    base: BOWER_PATH
+                }), cb)
+
+        if tasks.length
+            console.log('change:', v.path)
+            pre( ->
+                runSequence.apply(runSequence, tasks)
+            )
+        return
+    )
+    cb()
 
 gulp.task "clean:compiled",  ->
     return gulp.src(COMPILE_PATH)
@@ -172,7 +229,6 @@ gulp.task "inject", ->
                 return inject.transform.apply(inject.transform, [filepath])
         ))
         .pipe(gulp.dest(COMPILE_PATH))
-        .on "error", error_handle
 
 gulp.task('inject:version', ->
     return gulp.src(COMPILE_PATH + "/index.html")
@@ -185,70 +241,60 @@ gulp.task('inject:version', ->
                 return "<!-- version: #{data.version} -->"
         ))
         .pipe(gulp.dest(COMPILE_PATH))
-        .on "error", error_handle
 )
 
 gulp.task "webserver", ->
-    process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0" #hackaroo courtesy of https://github.com/request/request/issues/418
-    backend = config.backends[config.dev_server.backend]
-    apiVersion = backend.api_version
+    fallback = (req, res, next) ->
+        res.sendFile(path.join(__dirname, COMPILE_PATH, "index.html"))
 
-    makeProxy = (url) ->
-        return {
-            source: url,
-            target: "#{backend.host}#{url}"
-            options: {
-                protocol: "https:"
-                headers: {'X-App-Token': backend.app_token}
-            }
-        }
-    return gulp.src([
-            COMPILE_PATH
-            TEMP_PATH
-            APP_PATH
-        ])
-        .pipe(webserver(
-            fallback: 'index.html'
-            host: config.dev_server.host
-            port: config.dev_server.port
-            directoryListing:
-                enabled: true
-                path: COMPILE_PATH
-            proxies: [
-                makeProxy("/api/v#{apiVersion}/")
-                makeProxy("/photo/")
-            ],
-            middleware: [
-                (req, res, next) ->
-                    req.url = '/' if req.url  == ''
-                    next()
-            ]
-        ))
-        .on "error", error_handle
+    backend = config.backends[config.dev_server.backend]
+    app = express()
+    proxy = httpProxy.createProxyServer()
+
+    proxy.on('proxyReq', (proxyReq, req, res, options) ->
+        proxyReq.setHeader('X-App-Token', backend.app_token)
+        LOG_PROXY_HEADERS and console.log('proxy request', proxyReq.headers)
+    )
+    proxy.on('proxyRes', (proxyRes, req, res) ->
+        LOG_PROXY_HEADERS and console.log('proxy response', proxyRes.headers)
+    )
+    proxy.on('error', (err, req, res, options) ->
+        LOG_PROXY_HEADERS and console.log('proxy error', err)
+    )
+    app.use((req, res, next) ->
+        if req.method.toLowerCase() == 'delete' # fix 411 http errors on delete thing
+            req.headers['Content-Length'] = '0'
+        next()
+    )
+    app.all("/api/v#{backend.api_version}/*", (req, res) ->
+        LOG_PROXY_HEADERS and console.log('proxying ', req.url, 'to', backend.host)
+        proxy.web(req, res, {target: backend.host, secure: false, changeOrigin: true, rejectUnauthorized: false})
+    )
+    app.use((req, res, next) ->
+        if req.path.match(/\/[^\.]*$/) # path ends with /foo or /bar/ - not a static file
+            fallback(req, res, next)
+        else
+            next()
+    )
+    app.use("/", express.static(path.join(__dirname, COMPILE_PATH)))
+    app.use("/", express.static(path.join(__dirname, TEMP_PATH)))
+    app.use("/", express.static(path.join(__dirname, APP_PATH)))
+    app.use(fallback)
+    app.listen(config.dev_server.port, config.dev_server.host)
+    console.log("listening on ", config.dev_server.port)
 
 gulp.task "bower", ->
     return gulp.src(COMPILE_PATH + "/index.html")
         .pipe(wiredep({
             directory: BOWER_PATH
-            ignorePath: '../app'
+            ignorePath: '../app/'
             exclude: config.bower_exclude
         }))
         .pipe(gulp.dest(COMPILE_PATH))
-        .on "error", error_handle
-
 
 gulp.task "sass", ->
     return gulp.src(dedupeGlobs(paths.sass))
-        .pipe(sourcemaps.init())
-        .pipe(sass({
-            includePaths: [ '.tmp/', 'app/bower_components', 'app' ]
-            precision: 8
-            onError: (err) ->
-                console.log err
-        }))
-        .pipe(sourcemaps.write())
-        .pipe(gulp.dest(COMPILE_PATH + "/modules"))
-        .on("error", error_handle)
+        .pipe(pipes.sass())
 
 gulp.task "templates", ->
     return gulp.src(dedupeGlobs(paths.templates))
@@ -260,39 +306,33 @@ gulp.task "templates", ->
                 maxLineLength: 100
         ))
         .pipe(gulp.dest(COMPILE_PATH))
-        .on "error", error_handle
 
 gulp.task "coffee", ->
     return gulp.src(dedupeGlobs(paths.coffee))
-        .pipe(coffeelint())
-        .pipe(coffeelint.reporter())
-        .pipe(ngClassify(ngClassifyOptions))
-        .on("error", (err) ->
-            console.error(err)
-        )
-        .pipe(sourcemaps.init())
-        .pipe(coffee())
-        .pipe(sourcemaps.write())
-        .pipe(ngAnnotate())
-#        .pipe(gulpIf('*.js', uglify())) # makes it easy to test minification issues
-        .pipe(gulp.dest(COMPILE_PATH + "/modules"))
-        .on "error", error_handle
+        .pipe(pipes.coffee())
+
+
+gulp.task "coffee_lint", ->
+    return gulp.src(dedupeGlobs(paths.coffee))
+        .pipe(pipes.coffeeLint())
+
+
+copyDeps = (src, cb=->) ->
+    src.pipe(rename( (file) ->
+        if file.extname != ''
+            file.dirname = file.dirname.replace(/^.*?\/app\//, '')
+            return file
+        else
+            return no
+    ))
+    .pipe(gulp.dest(TEMP_PATH))
+    .on('end', cb)
 
 gulp.task "copy_deps", ->
-    return gulp.src(paths.assets, {
-            dot: true
-            base: BOWER_PATH
-        })
-        .pipe(rename( (file) ->
-            if file.extname != ''
-
-                parts = file.dirname.split('/')
-                file.dirname = file.dirname.replace(parts[0] + '/app/', '')
-                return file
-            else
-                return no
-        ))
-        .pipe(gulp.dest(TEMP_PATH));
+    copyDeps(gulp.src(paths.assets, {
+        dot: true
+        base: BOWER_PATH
+    }))
 
 copyExtras = (types..., dest) ->
     types.forEach((type) ->
@@ -320,8 +360,21 @@ gulp.task "images", ->
             progressive: true
             interlaced: true
         }))
-        .pipe(gulp.dest(DIST_PATH, cwd: DIST_PATH))
-        .on "error", error_handle
+        .pipe(gulp.dest('modules', cwd: DIST_PATH))
+
+gulp.task "add_banner", ->
+    banner = """/**
+* @preserve <%= pkg.name %> - <%= pkg.description %>
+* @version v<%= pkg.version %>
+* @link <%= pkg.homepage %>
+* @license <%= pkg.license %>
+**/
+
+"""
+    gulp.src(DIST_PATH+"/**/*.js")
+    .pipe(header(banner, pkg: require(path.join(__dirname, 'bower.json'))))
+    .pipe(gulp.dest(DIST_PATH))
+
 
 gulp.task "package:dist", ->
     assets = useref.assets()
@@ -329,13 +382,14 @@ gulp.task "package:dist", ->
         .pipe(assets)
         .pipe(gulpIf('*.js', ngAnnotate()))
         .pipe(gulpIf('*.js', uglify()))
-        .pipe(gulpIf('*.css', minifyCss()))
+        .pipe(gulpIf('*.css', minifyCss({
+            compatibility: 'colors.opacity' # ie doesnt like rgba values :P
+        })))
         .pipe(rev())
         .pipe(assets.restore())
         .pipe(useref())
         .pipe(revReplace())
         .pipe(gulp.dest(DIST_PATH))
-        .on "error", error_handle
 
 gulp.task "docs", ['clean:docs'], ->
     return gulp.src(dedupeGlobs(paths.coffee))
@@ -347,7 +401,6 @@ gulp.task "docs", ['clean:docs'], ->
             syntaxtype: 'coffee'
         }))
         .pipe(gulp.dest(DOCS_PATH))
-        .on "error", error_handle
 
 gulp.task "karma", ->
     bower_files = require("wiredep")(directory: BOWER_PATH).js
@@ -404,19 +457,21 @@ makeConfig = (isDebug, cb) ->
       versions[c.name] = c.version
     )
     bwr = require(path.join(__dirname, './bower.json'))
-    cfg = _.extend({}, require(path.join(__dirname, './config.json')))
-    backend = cfg.backends[config.dev_server.backend]
 
-    cfg.api_version = backend.api_version
-    cfg.app_version = bwr.version
-    cfg.app_id = backend.app_id
-    cfg.app_debug = isDebug
-    cfg.bower_versions = versions
-    cfg.build_date = new Date()
-    delete cfg.backends # shhhh super secret! don't tell anyone!
+    baseConfig = require(path.join(__dirname, "./config/config_base"))
+    if not baseConfig
+        console.error(path.join(__dirname, "./config/config_base.coffee")+" needs to exist!")
+
+    settings = baseConfig(isProdBuild, {
+        app_version: bwr.version
+        bower_versions: versions
+        build_date: new Date()
+    })
+
+
     template = """
         angular.module('appConfig', [])
-            .constant('APP_CONFIG', #{JSON.stringify(cfg)});
+            .constant('APP_CONFIG', #{JSON.stringify(settings)});
     """
     if not fs.existsSync(COMPILE_PATH)
         fs.mkdirSync(COMPILE_PATH)
