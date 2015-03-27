@@ -10,7 +10,6 @@ replace = require("gulp-replace")
 concat = require("gulp-concat")
 sourcemaps = require("gulp-sourcemaps")
 watch = require('gulp-watch')
-webserver = require("gulp-webserver")
 coffee = require("gulp-coffee")
 sourcemaps = require("gulp-sourcemaps")
 changed = require("gulp-changed")
@@ -226,6 +225,7 @@ gulp.task "inject", ->
         .pipe(inject(sources,
             ignorePath: [".compiled", BOWER_PATH]
             transform:  (filepath) ->
+                filepath = path.normalize(path.join(config.dev_server.staticRoot, filepath))
                 return inject.transform.apply(inject.transform, [filepath])
         ))
         .pipe(gulp.dest(COMPILE_PATH))
@@ -276,19 +276,34 @@ gulp.task "webserver", ->
         else
             next()
     )
-    app.use("/", express.static(path.join(__dirname, COMPILE_PATH)))
-    app.use("/", express.static(path.join(__dirname, TEMP_PATH)))
-    app.use("/", express.static(path.join(__dirname, APP_PATH)))
+    staticRoot = config.dev_server.staticRoot or "/"
+    app.use(staticRoot, express.static(path.join(__dirname, COMPILE_PATH)))
+    app.use(staticRoot, express.static(path.join(__dirname, TEMP_PATH)))
+    app.use(staticRoot, express.static(path.join(__dirname, APP_PATH)))
     app.use(fallback)
     app.listen(config.dev_server.port, config.dev_server.host)
     console.log("listening on ", config.dev_server.port)
 
 gulp.task "bower", ->
+    prefix = config.dev_server.staticRoot
     return gulp.src(COMPILE_PATH + "/index.html")
         .pipe(wiredep({
             directory: BOWER_PATH
             ignorePath: '../app/'
             exclude: config.bower_exclude
+            fileTypes: {
+                html: {
+                    block: /(([ \t]*)<!--\s*bower:*(\S*)\s*-->)(\n|\r|.)*?(<!--\s*endbower\s*-->)/gi,
+                    detect: {
+                        js: /<script.*src=['"]([^'"]+)/gi,
+                        css: /<link.*href=['"]([^'"]+)/gi
+                    },
+                    replace: {
+                        js: '<script src="'+prefix+'{{filePath}}"></script>',
+                        css: '<link rel="stylesheet" href="'+prefix+'{{filePath}}" />'
+                    }
+                }
+            }
         }))
         .pipe(gulp.dest(COMPILE_PATH))
 
