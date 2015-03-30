@@ -63,6 +63,11 @@ if '--prod' in process.argv
     isProdBuild = true
 
 
+if '--verbose' in process.argv
+    LOG_PROXY_HEADERS = true
+    console.log("====== verbose proxy header logging enabled ======")
+
+
 COMPILE_PATH = "./.compiled"            # Compiled JS and CSS, Images, served by webserver
 TEMP_PATH = "./.tmp"                    # hourlynerd dependencies copied over, uncompiled
 APP_PATH = "./app"                      # this module's precompiled CS and SASS
@@ -253,13 +258,15 @@ gulp.task "webserver", ->
 
     proxy.on('proxyReq', (proxyReq, req, res, options) ->
         proxyReq.setHeader('X-App-Token', backend.app_token)
-        LOG_PROXY_HEADERS and console.log('proxy request', proxyReq.headers)
+        LOG_PROXY_HEADERS and console.log('proxy request: headers:', proxyReq._headers)
+        LOG_PROXY_HEADERS and console.log('proxy request: method:', proxyReq.method)
+        LOG_PROXY_HEADERS and console.log('proxy request: path:', proxyReq.path)
     )
     proxy.on('proxyRes', (proxyRes, req, res) ->
-        LOG_PROXY_HEADERS and console.log('proxy response', proxyRes.headers)
+        LOG_PROXY_HEADERS and console.log('proxy response: headers:', proxyRes.headers)
     )
     proxy.on('error', (err, req, res, options) ->
-        LOG_PROXY_HEADERS and console.log('proxy error', err)
+        LOG_PROXY_HEADERS and console.log('proxy error:', err)
     )
     app.use((req, res, next) ->
         if req.method.toLowerCase() == 'delete' # fix 411 http errors on delete thing
