@@ -625,12 +625,6 @@ gulp.task('bower_install', (gulpCb) ->
     fs = require('fs')
     _ = require('underscore')
 
-    deps = []
-    _.each(require('./bower.json').dependencies, (v, k) ->
-        if k.match(/^hn-/i)
-            deps.push(k)
-    )
-
     parser = require('optimist')
         .usage('Update or link HN modules from bower')
         .describe('clean', 'install fresh dependencies')
@@ -638,7 +632,7 @@ gulp.task('bower_install', (gulpCb) ->
         .alias('all', 'a')
         .describe('h', 'print usage')
         .alias('h', 'help')
-        .default('link', deps.join(','))
+        .default('link', '')
 
 
     task = (command, cwd) ->
