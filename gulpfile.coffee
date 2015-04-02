@@ -81,13 +81,16 @@ dedupeGlobs = (globs, root="/modules") ->
     ignorePaths = []
     re = RegExp("^.*?"+root)
     globs.forEach((glb) ->
-        glob.sync(glb).forEach((p) ->
-            d = p.replace(re, "")
-            if not deduper[d]
-                deduper[d] = true
-            else
-                ignorePaths.push("!"+p)
-        )
+
+        if glb.charAt(0) != '!'
+            glob.sync(glb).forEach((p) ->
+                if p.indexOf('bower_components') <= -1
+                    d = p.replace(re, "")
+                    if not deduper[d]
+                        deduper[d] = p
+                    else
+                        ignorePaths.push("!"+p)
+            )
     )
     return globs.concat(ignorePaths)
 
@@ -101,27 +104,23 @@ ngClassifyOptions =
     appName: config.app_name
     provider:
         suffix: ''
-
+pathsForExt = (ext) ->
+    return [
+        "./app/*/**/*."+ext
+        "./.tmp/*/**/*."+ext
+        "!./app/bower_components/**/*."+ext
+    ]
 paths =
-    sass: [
-        "./app/modules/**/*.scss"
-        "./.tmp/modules/**/*.scss"
-    ]
-    templates: [
-        "./app/modules/**/*.html"
-        "./.tmp/modules/**/*.html"
-    ]
-    coffee: [
-        "./app/modules/**/*.coffee"
-        "./.tmp/modules/**/*.coffee"
-    ]
-    images: [
-        "./app/modules/**/images/*.+(png|jpg|gif|jpeg)"
-        "./.tmp/modules/**/images/*.+(png|jpg|gif|jpeg)"
-    ]
+    sass: pathsForExt('scss')
+    templates: pathsForExt('html')
+    coffee: pathsForExt('coffee')
+    images: pathsForExt('+(png|jpg|gif|jpeg)')
     fonts: BOWER_PATH + '/**/*.+(woff|woff2|svg|ttf|eot)'
     runtimes: BOWER_PATH + '/**/*.+(xap|swf)'
-    assets: BOWER_PATH + '/hn-*/app/modules/**/*.*'
+    assets: [
+        path.join(BOWER_PATH, '/hn-*/app/*/**/*.*')
+        "!"+path.join(BOWER_PATH, '/hn-*/app/bower_components/**/*.*')
+    ]
 
 pipes = {
     coffee:
@@ -129,12 +128,12 @@ pipes = {
             .pipe(ngClassify, ngClassifyOptions)
             .pipe(coffee)
             .pipe(ngAnnotate)
-            .pipe(gulp.dest, path.join(COMPILE_PATH, "modules"))
+            .pipe(gulp.dest, COMPILE_PATH)
     coffeeLint:
         lazypipe()
             .pipe(coffeelint)
             .pipe(coffeelint.reporter)
-            .pipe(gulp.dest, path.join(COMPILE_PATH, "modules"))
+            .pipe(gulp.dest, COMPILE_PATH)
     sass:
         lazypipe()
             .pipe(sourcemaps.init)
@@ -143,7 +142,7 @@ pipes = {
                 precision: 8
             })
             .pipe(sourcemaps.write)
-            .pipe(gulp.dest, path.join(COMPILE_PATH, "modules"))
+            .pipe(gulp.dest, COMPILE_PATH)
 }
 
 
@@ -152,12 +151,13 @@ gulp.task 'watch', (cb) ->
         runSequence('inject', 'bower')
     )
     types = '/**/*.+(js|css|coffee|html|scss)'
-    assets = [APP_PATH+"/modules"+types]
+    assets = [APP_PATH+"/modules"+types, APP_PATH+"/components"+types]
 
     _.each(glob.sync(path.join(BOWER_PATH, 'hn-*')), (p) ->
         resolved = fs.realpathSync(p)
         if resolved != p
             assets.push(path.join(resolved, 'app/modules'+types))
+            assets.push(path.join(resolved, 'app/components'+types))
     )
 
     watch(assets , followSymlinks: false, (v) ->
@@ -212,6 +212,7 @@ gulp.task "inject", ->
     target = gulp.src("./app/index.html")
     sources = gulp.src([
         "./.compiled/modules/**/*.css"
+        "./.compiled/components/**/*.css"
         "./.compiled/modules/"+config.main_module_name+"/"+config.main_module_name+".module.js"
         "./.compiled/modules/"+config.main_module_name+"/*.provider.js"
         "./.compiled/modules/"+config.main_module_name+"/*.run.js"
@@ -222,6 +223,7 @@ gulp.task "inject", ->
         "./.compiled/config.js"
         "./.compiled/modules/**/*.run.js"
         "./.compiled/modules/**/*.js"
+        "./.compiled/components/**/*.js"
         "!./.compiled/modules/**/tests/*"
         "!./.compiled/modules/**/*.backend.js"
     ], read: false)
@@ -317,15 +319,17 @@ gulp.task "bower", ->
 gulp.task "sass", ->
     return gulp.src(dedupeGlobs(paths.sass))
         .pipe(pipes.sass())
+        .on('error', (e) ->
+            console.error("Error in file "+e.fileName+" line "+e.lineNumber+":\n"+e.message)
+        )
 
 gulp.task "templates", ->
     return gulp.src(dedupeGlobs(paths.templates))
         .pipe(templateCache("templates.js",
             module: config.app_name
-            root: '/modules'
+            root: '/'
             htmlmin:
                 removeComments: true
-                maxLineLength: 100
         ))
         .pipe(gulp.dest(COMPILE_PATH))
 
@@ -382,20 +386,13 @@ gulp.task "images", ->
             progressive: true
             interlaced: true
         }))
-        .pipe(gulp.dest('modules', cwd: DIST_PATH))
+        .pipe(gulp.dest(DIST_PATH))
 
-gulp.task "add_banner", ->
-    banner = """/**
-* @preserve <%= pkg.name %> - <%= pkg.description %>
-* @version v<%= pkg.version %>
-* @link <%= pkg.homepage %>
-* @license <%= pkg.license %>
-**/
-
-"""
-    gulp.src(DIST_PATH+"/**/*.js")
-    .pipe(header(banner, pkg: require(path.join(__dirname, 'bower.json'))))
-    .pipe(gulp.dest(DIST_PATH))
+#gulp.task "add_banner", ->
+#    banner = """// <%= file.path %>"""
+#    gulp.src(DIST_PATH+"/**/*.js")
+#    .pipe(header(banner, file: {path: 'foo'}))
+#    .pipe(gulp.dest(DIST_PATH))
 
 
 gulp.task "package:dist", ->
@@ -508,13 +505,13 @@ gulp.task('make_config:dist', (cb) ->
 )
 
 gulp.task "update",  ->
-    getRemoteCode = (cb) ->
+    getRemoteCode = (filename, cb) ->
         console.log("Grabbing latest gulpfile from github...")
         remoteCode = ""
         req = https.request({
             host: 'raw.githubusercontent.com',
             port: 443,
-            path: '/HourlyNerd/gulp-build/standalone/gulpfile.coffee',
+            path: '/HourlyNerd/gulp-build/standalone/' + filename,
             method: 'GET'
             agent: false
         }, (res) ->
@@ -522,19 +519,179 @@ gulp.task "update",  ->
                 remoteCode += d
             )
             res.on('end', ->
-                cb(remoteCode)
+                cb(filename, remoteCode)
             )
         )
         req.end()
 
-    getRemoteCode((remoteCode) ->
-        localCode = fs.readFileSync('./gulpfile.coffee', 'utf8')
+    getRemoteCode('gulpfile.coffee', (filename, remoteCode) ->
+        localCode = fs.readFileSync("./#{filename}", 'utf8')
         if localCode.length != remoteCode.length
-            fs.writeFileSync("./gulpfile.coffee", remoteCode)
-            console.log("The contents of your gulpfile do not match latest. Updating...")
+            fs.writeFileSync("./#{filename}", remoteCode)
+            console.log("The contents of your #{filename} do not match latest. Updating...")
         else
-            console.log("Your gulpfile matches latest. No update required.")
+            console.log("Your #{filename} matches latest. No update required.")
     )
+
+    getRemoteCode('custom_gulp_tasks.coffee', (filename, remoteCode) ->
+        localCode = fs.readFileSync("./#{filename}", 'utf8')
+        if localCode.length != remoteCode.length
+            fs.writeFileSync("./#{filename}", remoteCode)
+            console.log("The contents of your #{filename} do not match latest. Updating...")
+        else
+            console.log("Your #{filename} matches latest. No update required.")
+    )
+
+# builds a json file containing all of this application's state urls
+gulp.task('build_routes', (cb) ->
+    OUTPUT = './app_routes.json'
+    INPUT = './.compiled/**/*.routes.js'
+
+    glob = require('glob')
+    path = require('path')
+    vm = require("vm")
+    fs = require("fs")
+
+    stateMap = {}
+
+    snakeSnakeIts_A_SNAAAAKE = (str) ->
+        # badger badger badger badger MUSHROOM MUSHROOM
+        return str.replace(/([A-Z])/g, "_$1").toLowerCase()
+
+
+    parseUrlParams = (url, abstract) ->
+        url = url.replace(/:(\w+)/g, (orig, match) -> "<string:" + snakeSnakeIts_A_SNAAAAKE(match) + ">")
+        surl = url.split("?")
+        if surl.length == 2
+            [path, qs] = surl
+            qps = []
+            for qp in qs.split("&")
+                qps.push(qp + "=<string:" + snakeSnakeIts_A_SNAAAAKE(qp) + ">")
+            url = path + "?" + qps.join("&")
+        return {url, abstract}
+
+    inject =
+        $urlRouterProvider:
+            when: (urlFrom, urlTo) ->
+                return inject.$stateProvider
+        $stateProvider:
+            state: (name, map) ->
+                stateMap[name] = parseUrlParams(map.url, !!map.abstract)
+                return inject.$stateProvider
+        coreSettingsProvider:
+            $get: ->
+                return {path: ->}
+        e:
+            UserType: {}
+
+    moduleMock =
+        config: (arr) ->
+            [things..., fn] = arr
+            args = []
+            for name in things
+                args.push(inject[name])
+            fn.apply(null, args)
+            return moduleMock
+        run: ->
+            return moduleMock
+
+    angular =
+        module: ->
+            return moduleMock
+
+
+    ctx =
+        angular: angular
+
+
+    for m in glob.sync(INPUT)
+        vm.runInNewContext(fs.readFileSync(m), ctx)
+
+    urlMap = {}
+    map = {}
+    Object.keys(stateMap).sort((a, b) ->
+        return a.split(".").length - b.split(".").length
+    ).forEach((s) ->
+        obj = stateMap[s]
+        states = s.split(".")
+        url = ""
+        states.forEach((state) ->
+            if not urlMap[state]
+                urlMap[state] = obj.url
+            url += urlMap[state]
+        )
+        if not obj.abstract
+            map[s] = url
+    )
+    fs.writeFileSync(OUTPUT, JSON.stringify(map, null, "    "))
+    console.log("wrote #{Object.keys(map).length} routes to #{OUTPUT}")
+)
+
+gulp.task('bower_install', (gulpCb) ->
+    exec = require('child_process').exec
+    path = require('path')
+    async = require('async')
+    fs = require('fs')
+    _ = require('underscore')
+
+    deps = []
+    _.each(require('./bower.json').dependencies, (v, k) ->
+        if k.match(/^hn-/i)
+            deps.push(k)
+    )
+
+    parser = require('optimist')
+        .usage('Update or link HN modules from bower')
+        .describe('clean', 'install fresh dependencies')
+        .describe('link', 'comma separated list of repos to link')
+        .alias('all', 'a')
+        .describe('h', 'print usage')
+        .alias('h', 'help')
+        .default('link', deps.join(','))
+
+
+    task = (command, cwd) ->
+        return (cb) ->
+            console.log("#{cwd}> "+command)
+            exec(command, cwd: cwd, (err, out) ->
+                if err
+                    console.log("ERR: ", err)
+                cb()
+            )
+            return
+
+    args = parser.argv
+    if args.help
+        console.log(parser.help())
+        return
+
+    console.log("Installing bower components:\n--link: #{args.link}")
+    console.log("--clean: #{(if args.clean then 'Yes' else 'No')}")
+    console.log("Starting...")
+    console.log("---------------------------------------------")
+
+    repos = args.link.split(',')
+
+    tasks = []
+    if args.clean
+        tasks.push(task("rm -rf #{path.join(__dirname, 'app', 'bower_components')}", __dirname))
+
+    tasks.push(task("bower install",  __dirname))
+
+    for r in repos
+        dir = path.join(__dirname, '..', r)
+        if fs.existsSync(dir)
+            tasks.push(task("bower link", dir))
+            tasks.push(task("bower link #{r}", __dirname))
+        else
+            console.log("#{r} does not exist! Did you git clone it? Looked here:", dir)
+
+
+    async.series(tasks, (err) ->
+        console.log("Finished!")
+        gulpCb()
+    )
+)
 
 gulp.task "default", (cb) ->
     runSequence(['clean:compiled', 'clean:tmp']
