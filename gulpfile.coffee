@@ -533,15 +533,6 @@ gulp.task "update",  ->
             console.log("Your #{filename} matches latest. No update required.")
     )
 
-    getRemoteCode('custom_gulp_tasks.coffee', (filename, remoteCode) ->
-        localCode = fs.readFileSync("./#{filename}", 'utf8')
-        if localCode.length != remoteCode.length
-            fs.writeFileSync("./#{filename}", remoteCode)
-            console.log("The contents of your #{filename} do not match latest. Updating...")
-        else
-            console.log("Your #{filename} matches latest. No update required.")
-    )
-
 # builds a json file containing all of this application's state urls
 gulp.task('build_routes', (cb) ->
     OUTPUT = './app_routes.json'
