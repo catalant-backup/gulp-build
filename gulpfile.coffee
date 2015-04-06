@@ -551,7 +551,7 @@ gulp.task('build_routes', (cb) ->
 
 
     parseUrlParams = (url, abstract) ->
-        url = url.replace(/{([^:]+):\w+}/g, (orig, match) -> "<string:" + snakeSnakeIts_A_SNAAAAKE(match) + ">")
+        url = url.replace(/{([^:]+)(:\w+)?}/g, (orig, match) -> "<string:" + snakeSnakeIts_A_SNAAAAKE(match) + ">")
         url = url.replace(/\/:(\w+)/g, (orig, match) -> "/<string:" + snakeSnakeIts_A_SNAAAAKE(match) + ">")
         surl = url.split("?")
         if surl.length == 2
