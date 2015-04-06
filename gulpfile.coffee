@@ -551,7 +551,8 @@ gulp.task('build_routes', (cb) ->
 
 
     parseUrlParams = (url, abstract) ->
-        url = url.replace(/:(\w+)/g, (orig, match) -> "<string:" + snakeSnakeIts_A_SNAAAAKE(match) + ">")
+        url = url.replace(/{([^:]+):\w+}/g, (orig, match) -> "<string:" + snakeSnakeIts_A_SNAAAAKE(match) + ">")
+        url = url.replace(/\/:(\w+)/g, (orig, match) -> "/<string:" + snakeSnakeIts_A_SNAAAAKE(match) + ">")
         surl = url.split("?")
         if surl.length == 2
             [path, qs] = surl
@@ -569,6 +570,10 @@ gulp.task('build_routes', (cb) ->
             state: (name, map) ->
                 stateMap[name] = parseUrlParams(map.url, !!map.abstract)
                 return inject.$stateProvider
+        componentProvider:
+            state: (map) ->
+                stateMap[map.name] = parseUrlParams(map.url, !!map.abstract)
+                return inject.componentProvider
         coreSettingsProvider:
             $get: ->
                 return {path: ->}
@@ -604,18 +609,64 @@ gulp.task('build_routes', (cb) ->
         return a.split(".").length - b.split(".").length
     ).forEach((s) ->
         obj = stateMap[s]
-        states = s.split(".")
-        url = ""
-        states.forEach((state) ->
-            if not urlMap[state]
-                urlMap[state] = obj.url
-            url += urlMap[state]
-        )
+        st = s.split(".")
+        if st.length > 1
+            parentState = st.slice(0, st.length-1).join('.')
+            if urlMap[parentState] is undefined
+                console.log('parent state not found:', parentState, s)
+            url = urlMap[s] = urlMap[parentState] + obj.url
+        else
+            urlMap[s] = obj.url
         if not obj.abstract
             map[s] = url
     )
     fs.writeFileSync(OUTPUT, JSON.stringify(map, null, "    "))
     console.log("wrote #{Object.keys(map).length} routes to #{OUTPUT}")
+)
+
+# builds a json file containing all of this application's state urls
+gulp.task('moo', (cb) ->
+    OUTPUT = './poop.html'
+    INPUT = './.compiled/**/*.cmp.js'
+
+    glob = require('glob')
+    path = require('path')
+    vm = require("vm")
+    fs = require("fs")
+
+    components = {}
+
+    kababYum = (str) ->
+        return str.replace(/([A-Z])/g, "-$1").toLowerCase()
+
+    moduleMock =
+        directive: (name, arr) ->
+            ret = arr.pop()()
+            scope = ret.scope
+            components[kababYum(name)] =
+                vars: _.keys(scope)
+                attrs: _.map(_.keys(scope), kababYum)
+                transclude: ret.transclude
+            return moduleMock
+
+    angular =
+        module: (x) ->
+            console.log('module', x)
+            return moduleMock
+
+
+    ctx =
+        angular: angular
+
+
+    for m in glob.sync(INPUT)
+        vm.runInNewContext(fs.readFileSync(m), ctx)
+
+    console.log(components)
+
+
+    #fs.writeFileSync(OUTPUT, JSON.stringify(map, null, "    "))
+    #console.log("wrote #{Object.keys(map).length} routes to #{OUTPUT}")
 )
 
 gulp.task('bower_install', (gulpCb) ->
