@@ -1,6 +1,7 @@
 config = require('./config.json')
 fs = require('fs')
 https = require('https')
+httpProxy = require('http-proxy')
 path = require('path')
 gulp = require("gulp")
 glob = require("glob")
@@ -9,7 +10,6 @@ replace = require("gulp-replace")
 concat = require("gulp-concat")
 sourcemaps = require("gulp-sourcemaps")
 watch = require('gulp-watch')
-webserver = require("gulp-webserver")
 coffee = require("gulp-coffee")
 sourcemaps = require("gulp-sourcemaps")
 changed = require("gulp-changed")
@@ -34,11 +34,40 @@ protractor = require("gulp-protractor").protractor
 sprite = require('css-sprite').stream
 rev = require('gulp-rev')
 revReplace = require('gulp-rev-replace')
-_ = require('underscore')
+_ = require("underscore")
+header = require('gulp-header')
+plumber = require('gulp-plumber')
+gutil = require('gulp-util')
+lazypipe = require('lazypipe')
+express = require('express')
+sassGraph = require('gulp-sass-graph')
 
-error_handle = (err) ->
-    console.error err
+gulp_src = gulp.src
+
+gulp.src = ->
+  gulp_src.apply(gulp, arguments).pipe(plumber((error) ->
+    # Output an error message
+    gutil.log gutil.colors.red('Error (' + error.plugin + '): ' + error.message)
+    # emit the end event, to properly end the task
+    @emit 'end'
     return
+  ))
+
+LOG_PROXY_HEADERS = false
+isProdBuild = false
+
+if '--staging' in process.argv
+    config.dev_server.backend = 'staging'
+
+
+if '--prod' in process.argv
+    isProdBuild = true
+
+
+if '--verbose' in process.argv
+    LOG_PROXY_HEADERS = true
+    console.log("====== verbose proxy header logging enabled ======")
+
 
 COMPILE_PATH = "./.compiled"            # Compiled JS and CSS, Images, served by webserver
 TEMP_PATH = "./.tmp"                    # hourlynerd dependencies copied over, uncompiled
@@ -47,29 +76,25 @@ BOWER_PATH = "./app/bower_components"   # this module's bower dependencies
 DOCS_PATH = './docs'
 DIST_PATH = './dist'
 
-if '--staging' in process.argv
-    config.dev_server.backend = 'staging'
+dedupeGlobs = (globs, root="/modules") ->
+    #expand globs arrays, dedupe paths after 'root' in order of arrival. return a new glob array ignoring dupes
+    deduper = {}
+    ignorePaths = []
+    re = RegExp("^.*?"+root)
+    globs.forEach((glb) ->
 
-paths =
-    sass: [
-        "./app/modules/**/*.scss"
-        "./.tmp/modules/**/*.scss"
-    ]
-    templates: [
-        "./app/modules/**/*.html"
-        "./.tmp/modules/**/*.html"
-    ]
-    coffee: [
-        "./app/modules/**/*.coffee"
-        "./.tmp/modules/**/*.coffee"
-    ]
-    images: [
-        "./app/modules/**/images/*.+(png|jpg|gif|jpeg)"
-        "./.tmp/modules/**/images/*.+(png|jpg|gif|jpeg)"
-    ]
-    fonts: BOWER_PATH + '/**/*.+(woff|woff2|svg|ttf|eot)'
-    hn_assets: BOWER_PATH + '/hn-*/app/modules/**/*.*'
-    #images_main: "./app/images/*.+(png|jpg|gif|jpeg)"
+        if glb.charAt(0) != '!'
+            glob.sync(glb).forEach((p) ->
+                if p.indexOf('bower_components') <= -1
+                    d = p.replace(re, "")
+                    if not deduper[d]
+                        deduper[d] = p
+                    else
+                        ignorePaths.push("!"+p)
+            )
+    )
+    return globs.concat(ignorePaths)
+
 
 ngClassifyOptions =
     controller:
@@ -80,43 +105,107 @@ ngClassifyOptions =
     appName: config.app_name
     provider:
         suffix: ''
+pathsForExt = (ext) ->
+    return [
+        "./app/*/**/*."+ext
+        "./.tmp/*/**/*."+ext
+        "!./app/bower_components/**/*."+ext
+    ]
+paths =
+    sass: pathsForExt('scss')
+    templates: pathsForExt('html')
+    coffee: pathsForExt('coffee')
+    images: pathsForExt('+(png|jpg|gif|jpeg)')
+    fonts: BOWER_PATH + '/**/*.+(woff|woff2|svg|ttf|eot)'
+    runtimes: BOWER_PATH + '/**/*.+(xap|swf)'
+    assets: [
+        path.join(BOWER_PATH, '/hn-*/app/*/**/*.*')
+        "!"+path.join(BOWER_PATH, '/hn-*/app/bower_components/**/*.*')
+    ]
 
-gulp.task('watch', ->
-    watch(paths.sass, ->
-        runSequence('sass', 'inject', 'bower')
-    )
-    watch(paths.coffee, (event) ->
-        runSequence('coffee', 'inject', 'bower')
-    )
-    watch(BOWER_PATH, ->
-        runSequence('inject', 'bower')
-    )
-    watch(paths.templates, ->
-        runSequence('templates', 'inject', 'bower')
-    )
+
+pipes = {
+    coffee:
+        lazypipe()
+            .pipe(ngClassify, ngClassifyOptions)
+            .pipe(coffee)
+            .pipe(ngAnnotate)
+            .pipe(gulp.dest, COMPILE_PATH)
+    coffeeLint:
+        lazypipe()
+            .pipe(coffeelint)
+            .pipe(coffeelint.reporter)
+            .pipe(gulp.dest, COMPILE_PATH)
+    sass:
+        lazypipe()
+            .pipe(sourcemaps.init)
+            .pipe(sass, {
+                includePaths: ['.tmp/', 'app/bower_components', 'app']
+                precision: 8
+            })
+            .pipe(sourcemaps.write)
+            .pipe(gulp.dest, COMPILE_PATH)
+}
+
+
+gulp.task 'watch', (cb) ->
     watch(APP_PATH+'/index.html', ->
         runSequence('inject', 'bower')
     )
-    watch(paths.hn_assets, ->
-        runSequence('clean:tmp', 'clean:compiled', 'make_config', 'inject', 'inject:version', 'copy_deps', ['coffee', 'sass'])
-    )
-)
+    types = '/**/*.+(js|css|coffee|html|scss)'
+    assets = [APP_PATH+"/modules"+types, APP_PATH+"/components"+types]
 
-gulp.task "clean:compiled", (cb) ->
+    _.each(glob.sync(path.join(BOWER_PATH, 'hn-*')), (p) ->
+        resolved = fs.realpathSync(p)
+        if resolved != p
+            assets.push(path.join(resolved, 'app/modules'+types))
+            assets.push(path.join(resolved, 'app/components'+types))
+    )
+
+    watch(assets , followSymlinks: false, (v) ->
+        tasks = []
+        pre = (cb) ->
+            cb()
+        ext = path.extname(v.path).toLowerCase()
+        if ext == '.scss'
+            tasks = ['sass', 'inject', 'bower']
+        if ext == '.coffee'
+            tasks = ['coffee', 'inject', 'bower']
+        if ext == '.html'
+            tasks = ['templates']
+        assetPath = v.path
+        if v.path.indexOf(__dirname) != 0 # this path comes from within the bower components dir
+            pre = (cb) ->
+                assetPath = v.path.replace(/^.*?\/app\//, TEMP_PATH+"/") # gets put here next
+                copyDeps(gulp.src(v.path, {
+                    dot: true
+                    base: BOWER_PATH
+                }), cb)
+
+        if tasks.length
+            console.log('change:', v.path)
+            pre( ->
+                runSequence.apply(runSequence, tasks)
+            )
+        return
+    )
+    cb()
+
+gulp.task "clean:compiled",  ->
     return gulp.src(COMPILE_PATH)
         .pipe(vinylPaths(del))
 
-gulp.task "clean:tmp", (cb) ->
+gulp.task "clean:tmp",  ->
     return gulp.src(TEMP_PATH)
         .pipe(vinylPaths(del))
 
 
-gulp.task "clean:docs", (cb) ->
+gulp.task "clean:docs",  ->
     return gulp.src(DOCS_PATH)
         .pipe(vinylPaths(del))
 
 
-gulp.task "clean:dist", (cb) ->
+gulp.task "clean:dist",  ->
     return gulp.src(DIST_PATH)
         .pipe(vinylPaths(del))
 
@@ -125,6 +214,7 @@ gulp.task "inject", ->
     target = gulp.src("./app/index.html")
     sources = gulp.src([
         "./.compiled/modules/**/*.css"
+        "./.compiled/components/**/*.css"
         "./.compiled/modules/"+config.main_module_name+"/"+config.main_module_name+".module.js"
         "./.compiled/modules/"+config.main_module_name+"/*.provider.js"
         "./.compiled/modules/"+config.main_module_name+"/*.run.js"
@@ -135,19 +225,19 @@ gulp.task "inject", ->
         "./.compiled/config.js"
         "./.compiled/modules/**/*.run.js"
         "./.compiled/modules/**/*.js"
+        "./.compiled/components/**/*.js"
         "!./.compiled/modules/**/tests/*"
         "!./.compiled/modules/**/*.backend.js"
     ], read: false)
 
     return target
         .pipe(inject(sources,
-            ignorePath: ['.compiled', BOWER_PATH]
+            ignorePath: [".compiled", BOWER_PATH]
             transform:  (filepath) ->
-                filepath = path.normalize(path.join(config.deploy_path, filepath))
+                filepath = path.normalize(path.join(config.dev_server.staticRoot, filepath))
                 return inject.transform.apply(inject.transform, [filepath])
         ))
         .pipe(gulp.dest(COMPILE_PATH))
-        .on "error", error_handle
 
 gulp.task('inject:version', ->
     return gulp.src(COMPILE_PATH + "/index.html")
@@ -160,52 +250,53 @@ gulp.task('inject:version', ->
                 return "<!-- version: #{data.version} -->"
         ))
         .pipe(gulp.dest(COMPILE_PATH))
-        .on "error", error_handle
 )
-gulp.task "webserver", ->
-    process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0" #hackaroo courtesy of https://github.com/request/request/issues/418
-    backend = config.backends[config.dev_server.backend]
-    apiVersion = backend.api_version
 
-    makeProxy = (url) ->
-        return {
-            source: url,
-            target: "#{backend.host}#{url}"
-            options: {
-                protocol: "https:"
-                headers: {'X-App-Token': backend.app_token}
-            }
-        }
-    return gulp.src([
-            COMPILE_PATH
-            TEMP_PATH
-            APP_PATH
-        ])
-        .pipe(webserver(
-            fallback: 'index.html'
-            host: config.dev_server.host
-            port: config.dev_server.port
-            directoryListing:
-                enabled: true
-                path: COMPILE_PATH
-            proxies: [
-                makeProxy("/api/v#{apiVersion}/")
-                makeProxy("/photo/")
-            ],
-            middleware: [
-                (req, res, next) ->
-                    if req.url.indexOf(config.web_root) == 0
-                        req.url = req.url.substring(config.web_root.length)
-                    if req.url.indexOf(config.deploy_path) == 0
-                        req.url = req.url.substring(config.deploy_path.length)
-                    req.url = '/' if req.url == ''
-                    next()
-            ]
-        ))
-        .on "error", error_handle
+gulp.task "webserver", ->
+    fallback = (req, res, next) ->
+        res.sendFile(path.join(__dirname, COMPILE_PATH, "index.html"))
+
+    backend = config.backends[config.dev_server.backend]
+    app = express()
+    proxy = httpProxy.createProxyServer()
+
+    proxy.on('proxyReq', (proxyReq, req, res, options) ->
+        proxyReq.setHeader('X-App-Token', backend.app_token)
+        LOG_PROXY_HEADERS and console.log('proxy request: headers:', proxyReq._headers)
+        LOG_PROXY_HEADERS and console.log('proxy request: method:', proxyReq.method)
+        LOG_PROXY_HEADERS and console.log('proxy request: path:', proxyReq.path)
+    )
+    proxy.on('proxyRes', (proxyRes, req, res) ->
+        LOG_PROXY_HEADERS and console.log('proxy response: headers:', proxyRes.headers)
+    )
+    proxy.on('error', (err, req, res, options) ->
+        LOG_PROXY_HEADERS and console.log('proxy error:', err)
+    )
+    app.use((req, res, next) ->
+        if req.method.toLowerCase() == 'delete' # fix 411 http errors on delete thing
+            req.headers['Content-Length'] = '0'
+        next()
+    )
+    app.all("/api/v#{backend.api_version}/*", (req, res) ->
+        LOG_PROXY_HEADERS and console.log('proxying ', req.url, 'to', backend.host)
+        proxy.web(req, res, {target: backend.host, secure: false, changeOrigin: true, rejectUnauthorized: false})
+    )
+    app.use((req, res, next) ->
+        if req.path.match(/\/[^\.]*$/) # path ends with /foo or /bar/ - not a static file
+            fallback(req, res, next)
+        else
+            next()
+    )
+    staticRoot = config.dev_server.staticRoot or "/"
+    app.use(staticRoot, express.static(path.join(__dirname, COMPILE_PATH)))
+    app.use(staticRoot, express.static(path.join(__dirname, TEMP_PATH)))
+    app.use(staticRoot, express.static(path.join(__dirname, APP_PATH)))
+    app.use(fallback)
+    app.listen(config.dev_server.port, config.dev_server.host)
+    console.log("listening on ", config.dev_server.port)
 
 gulp.task "bower", ->
-    prefix = path.join(config.deploy_path, "/")
+    prefix = config.dev_server.staticRoot
     return gulp.src(COMPILE_PATH + "/index.html")
         .pipe(wiredep({
             directory: BOWER_PATH
@@ -226,122 +317,104 @@ gulp.task "bower", ->
             }
         }))
         .pipe(gulp.dest(COMPILE_PATH))
-        .on "error", error_handle
-
 
 gulp.task "sass", ->
-    return gulp.src(paths.sass)
-        .pipe(sourcemaps.init())
-        .pipe(sass({
-            includePaths: [ '.tmp/', 'app/bower_components', 'app' ]
-            precision: 8
-            onError: (err) ->
-                console.log err
-        }))
-        .pipe(sourcemaps.write())
-        .pipe(gulp.dest(COMPILE_PATH + "/modules"))
-        .on("error", error_handle)
+    return gulp.src(dedupeGlobs(paths.sass))
+        .pipe(changed(COMPILE_PATH))
+        .pipe(pipes.sass())
+        .on('error', (e) ->
+            console.error("Error in file "+e.fileName+" line "+e.lineNumber+":\n"+e.message)
+        )
 
 gulp.task "templates", ->
-    return gulp.src(paths.templates)
+    return gulp.src(dedupeGlobs(paths.templates))
         .pipe(templateCache("templates.js",
             module: config.app_name
-            root: path.join('/modules')
+            root: '/'
             htmlmin:
                 removeComments: true
-                maxLineLength: 100
         ))
         .pipe(gulp.dest(COMPILE_PATH))
-        .on "error", error_handle
 
 gulp.task "coffee", ->
-    return gulp.src(paths.coffee)
- #       .pipe(coffeelint())
- #       .pipe(coffeelint.reporter())
-        .pipe(ngClassify(ngClassifyOptions))
-        .on("error", (err) ->
-            console.error(err)
-            this.emit('end')
-        )
-#        .pipe(sourcemaps.init())
-        .pipe(coffee())
-#        .pipe(sourcemaps.write())
-        .pipe(ngAnnotate())
-        .pipe(gulp.dest(COMPILE_PATH + "/modules"))
-        .on "error", error_handle
+    return gulp.src(dedupeGlobs(paths.coffee))
+        .pipe(pipes.coffee())
+
+
+gulp.task "coffee_lint", ->
+    return gulp.src(dedupeGlobs(paths.coffee))
+        .pipe(pipes.coffeeLint())
+
+
+copyDeps = (src, cb=->) ->
+    src.pipe(rename( (file) ->
+        if file.extname != ''
+            file.dirname = file.dirname.replace(/^.*?\/app\//, '')
+            return file
+        else
+            return no
+    ))
+    .pipe(gulp.dest(TEMP_PATH))
+    .on('end', cb)
 
 gulp.task "copy_deps", ->
-    return gulp.src(paths.hn_assets, {
-            dot: true
-            base: "./app/bower_components"
-        })
-        .pipe(rename( (file) ->
-            if file.extname != ''
+    copyDeps(gulp.src(paths.assets, {
+        dot: true
+        base: BOWER_PATH
+    }))
 
-                parts = file.dirname.split('/')
-                file.dirname = file.dirname.replace(parts[0] + '/app/', '')
+copyExtras = (types..., dest) ->
+    types.forEach((type) ->
+        gulp.src(paths[type], {
+            dot: true
+            base: BOWER_PATH
+        }).pipe(rename((file) ->
+            if file.extname != ''
+                file.dirname = type
                 return file
             else
                 return no
-        ))
-        .pipe(gulp.dest(TEMP_PATH));
+        )).pipe(gulp.dest(dest))
+    )
+gulp.task "copy_extras", ->
+    copyExtras('fonts', 'runtimes', COMPILE_PATH)
 
-gulp.task "copy_fonts", ->
-    return gulp.src(paths.fonts, {
-            dot: true
-            base: "./app/bower_components"
-        }).pipe(rename( (file) ->
-            if file.extname != ''
-                file.dirname = 'ng/fonts'
-                return file
-            else
-                return no
-        ))
-        .pipe(gulp.dest(COMPILE_PATH))
-        .pipe(gulp.dest(DIST_PATH))
+gulp.task "copy_extras:dist", ->
+    copyExtras('fonts', 'runtimes', DIST_PATH)
 
 gulp.task "images", ->
-    return gulp.src(paths.images)
+    return gulp.src(dedupeGlobs(paths.images))
         .pipe(imageop({
             optimizationLevel: 5
             progressive: true
             interlaced: true
         }))
-        .pipe(gulp.dest(DIST_PATH, cwd: DIST_PATH))
-        .on "error", error_handle
+        .pipe(gulp.dest(DIST_PATH))
 
+#gulp.task "add_banner", ->
+#    banner = """// <%= file.path %>"""
+#    gulp.src(DIST_PATH+"/**/*.js")
+#    .pipe(header(banner, file: {path: 'foo'}))
+#    .pipe(gulp.dest(DIST_PATH))
 
-gulp.task "move_folders", ->
-    return gulp.src([
-            DIST_PATH + "/dist/**"
-        ])
-        .pipe(gulp.dest(DIST_PATH + "/ng/modules"))
-
-gulp.task "delete_things", (cb) ->
-    del([
-        DIST_PATH + "/dist/**"
-    ], cb)
 
 gulp.task "package:dist", ->
     assets = useref.assets()
-    jsRe = RegExp("""<script.*src=["]#{config.deploy_path}/([^"]+)""", 'gi')
-    cssRe = RegExp("""<link.*href=["]#{config.deploy_path}/([^"]+)""", 'gi')
     return gulp.src(COMPILE_PATH + "/index.html")
-        .pipe(replace(jsRe, '<script src="$1'))
-        .pipe(replace(cssRe, '<link rel="stylesheet" href="$1'))
         .pipe(assets)
         .pipe(gulpIf('*.js', ngAnnotate()))
         .pipe(gulpIf('*.js', uglify()))
-        .pipe(gulpIf('*.css', minifyCss()))
+        .pipe(gulpIf('*.css', minifyCss({
+            compatibility: 'colors.opacity' # ie doesnt like rgba values :P
+        })))
         .pipe(rev())
         .pipe(assets.restore())
         .pipe(useref())
         .pipe(revReplace())
         .pipe(gulp.dest(DIST_PATH))
-        .on "error", error_handle
 
 gulp.task "docs", ['clean:docs'], ->
-    return gulp.src(paths.coffee)
+    return gulp.src(dedupeGlobs(paths.coffee))
         .pipe(yuidoc({
             project:
                 name: config.app_name + " Documentation"
@@ -350,7 +423,6 @@ gulp.task "docs", ['clean:docs'], ->
             syntaxtype: 'coffee'
         }))
         .pipe(gulp.dest(DOCS_PATH))
-        .on "error", error_handle
 
 gulp.task "karma", ->
     bower_files = require("wiredep")(directory: BOWER_PATH).js
@@ -388,7 +460,7 @@ gulp.task('e2e', (cb) ->
 # See .tmp/sprite.scss after compilation step to see variable names.
 # Variable name = $[module_name]-images-[filename_underscore_separated]
 gulp.task('sprite', ->
-    return gulp.src(paths.images)
+    return gulp.src(dedupeGlobs(paths.images))
     .pipe(sprite({
         name: "sprite"
         style: "sprite.scss"
@@ -407,19 +479,21 @@ makeConfig = (isDebug, cb) ->
       versions[c.name] = c.version
     )
     bwr = require(path.join(__dirname, './bower.json'))
-    cfg = _.extend({}, require(path.join(__dirname, './config.json')))
-    backend = cfg.backends[config.dev_server.backend]
 
-    cfg.api_version = backend.api_version
-    cfg.app_version = bwr.version
-    cfg.app_id = backend.app_id
-    cfg.app_debug = isDebug
-    cfg.bower_versions = versions
-    cfg.build_date = new Date()
-    delete cfg.backends
+    baseConfig = require(path.join(__dirname, "./config/config_base"))
+    if not baseConfig
+        console.error(path.join(__dirname, "./config/config_base.coffee")+" needs to exist!")
+
+    settings = baseConfig(isProdBuild, {
+        app_version: bwr.version
+        bower_versions: versions
+        build_date: new Date()
+    })
+
+
     template = """
         angular.module('appConfig', [])
-            .constant('APP_CONFIG', #{JSON.stringify(cfg)});
+            .constant('APP_CONFIG', #{JSON.stringify(settings)});
     """
     if not fs.existsSync(COMPILE_PATH)
         fs.mkdirSync(COMPILE_PATH)
@@ -433,15 +507,14 @@ gulp.task('make_config:dist', (cb) ->
     makeConfig(false, cb)
 )
 
-
 gulp.task "update",  ->
-    getRemoteCode = (cb) ->
+    getRemoteCode = (filename, cb) ->
         console.log("Grabbing latest gulpfile from github...")
         remoteCode = ""
         req = https.request({
             host: 'raw.githubusercontent.com',
             port: 443,
-            path: '/HourlyNerd/gulp-build/master/gulpfile.coffee',
+            path: '/HourlyNerd/gulp-build/standalone/' + filename,
             method: 'GET'
             agent: false
         }, (res) ->
@@ -449,19 +522,216 @@ gulp.task "update",  ->
                 remoteCode += d
             )
             res.on('end', ->
-                cb(remoteCode)
+                cb(filename, remoteCode)
             )
         )
         req.end()
 
-    getRemoteCode((remoteCode) ->
-        localCode = fs.readFileSync('./gulpfile.coffee', 'utf8')
+    getRemoteCode('gulpfile.coffee', (filename, remoteCode) ->
+        localCode = fs.readFileSync("./#{filename}", 'utf8')
         if localCode.length != remoteCode.length
-            fs.writeFileSync("./gulpfile.coffee", remoteCode)
-            console.log("The contents of your gulpfile do not match latest. Updating...")
+            fs.writeFileSync("./#{filename}", remoteCode)
+            console.log("The contents of your #{filename} do not match latest. Updating...")
         else
-            console.log("Your gulpfile matches latest. No update required.")
+            console.log("Your #{filename} matches latest. No update required.")
     )
+
+# builds a json file containing all of this application's state urls
+gulp.task('build_routes', (cb) ->
+    OUTPUT = './app_routes.json'
+    INPUT = './.compiled/**/*.routes.js'
+
+    glob = require('glob')
+    path = require('path')
+    vm = require("vm")
+    fs = require("fs")
+
+    stateMap = {}
+
+    snakeSnakeIts_A_SNAAAAKE = (str) ->
+        # badger badger badger badger MUSHROOM MUSHROOM
+        return str.replace(/([A-Z])/g, "_$1").toLowerCase()
+
+
+    parseUrlParams = (url, abstract) ->
+        url = url.replace(/{([^:]+)(:\w+)?}/g, (orig, match) -> "<string:" + snakeSnakeIts_A_SNAAAAKE(match) + ">")
+        url = url.replace(/\/:(\w+)/g, (orig, match) -> "/<string:" + snakeSnakeIts_A_SNAAAAKE(match) + ">")
+        surl = url.split("?")
+        if surl.length == 2
+            [path, qs] = surl
+            qps = []
+            for qp in qs.split("&")
+                qps.push(qp + "=<string:" + snakeSnakeIts_A_SNAAAAKE(qp) + ">")
+            url = path + "?" + qps.join("&")
+        return {url, abstract}
+
+    inject =
+        $urlRouterProvider:
+            when: (urlFrom, urlTo) ->
+                return inject.$stateProvider
+        $stateProvider:
+            state: (name, map) ->
+                stateMap[name] = parseUrlParams(map.url, !!map.abstract)
+                return inject.$stateProvider
+        componentProvider:
+            state: (map) ->
+                stateMap[map.name] = parseUrlParams(map.url, !!map.abstract)
+                return inject.componentProvider
+        coreSettingsProvider:
+            $get: ->
+                return {path: ->}
+        e:
+            UserType: {}
+
+    moduleMock =
+        config: (arr) ->
+            [things..., fn] = arr
+            args = []
+            for name in things
+                args.push(inject[name])
+            fn.apply(null, args)
+            return moduleMock
+        run: ->
+            return moduleMock
+
+    angular =
+        module: ->
+            return moduleMock
+
+
+    ctx =
+        angular: angular
+
+
+    for m in glob.sync(INPUT)
+        vm.runInNewContext(fs.readFileSync(m), ctx)
+
+    urlMap = {}
+    map = {}
+    Object.keys(stateMap).sort((a, b) ->
+        return a.split(".").length - b.split(".").length
+    ).forEach((s) ->
+        obj = stateMap[s]
+        st = s.split(".")
+        if st.length > 1
+            parentState = st.slice(0, st.length-1).join('.')
+            if urlMap[parentState] is undefined
+                console.log('parent state not found:', parentState, s)
+            url = urlMap[s] = urlMap[parentState] + obj.url
+        else
+            urlMap[s] = obj.url
+        if not obj.abstract
+            map[s] = url
+    )
+    fs.writeFileSync(OUTPUT, JSON.stringify(map, null, "    "))
+    console.log("wrote #{Object.keys(map).length} routes to #{OUTPUT}")
+)
+
+# builds a json file containing all of this application's state urls
+gulp.task('moo', (cb) ->
+    OUTPUT = './poop.html'
+    INPUT = './.compiled/**/*.cmp.js'
+
+    glob = require('glob')
+    path = require('path')
+    vm = require("vm")
+    fs = require("fs")
+
+    components = {}
+
+    kababYum = (str) ->
+        return str.replace(/([A-Z])/g, "-$1").toLowerCase()
+
+    moduleMock =
+        directive: (name, arr) ->
+            ret = arr.pop()()
+            scope = ret.scope
+            components[kababYum(name)] =
+                vars: _.keys(scope)
+                attrs: _.map(_.keys(scope), kababYum)
+                transclude: ret.transclude
+            return moduleMock
+
+    angular =
+        module: (x) ->
+            console.log('module', x)
+            return moduleMock
+
+
+    ctx =
+        angular: angular
+
+
+    for m in glob.sync(INPUT)
+        vm.runInNewContext(fs.readFileSync(m), ctx)
+
+    console.log(components)
+
+
+    #fs.writeFileSync(OUTPUT, JSON.stringify(map, null, "    "))
+    #console.log("wrote #{Object.keys(map).length} routes to #{OUTPUT}")
+)
+
+gulp.task('bower_install', (gulpCb) ->
+    exec = require('child_process').exec
+    path = require('path')
+    async = require('async')
+    fs = require('fs')
+    _ = require('underscore')
+
+    parser = require('optimist')
+        .usage('Update or link HN modules from bower')
+        .describe('clean', 'install fresh dependencies')
+        .describe('link', 'comma separated list of repos to link')
+        .alias('all', 'a')
+        .describe('h', 'print usage')
+        .alias('h', 'help')
+        .default('link', '')
+
+
+    task = (command, cwd) ->
+        return (cb) ->
+            console.log("#{cwd}> "+command)
+            exec(command, cwd: cwd, (err, out) ->
+                if err
+                    console.log("ERR: ", err)
+                cb()
+            )
+            return
+
+    args = parser.argv
+    if args.help
+        console.log(parser.help())
+        return
+
+    console.log("Installing bower components:\n--link: #{args.link}")
+    console.log("--clean: #{(if args.clean then 'Yes' else 'No')}")
+    console.log("Starting...")
+    console.log("---------------------------------------------")
+
+    repos = args.link.split(',')
+
+    tasks = []
+    if args.clean
+        tasks.push(task("rm -rf #{path.join(__dirname, 'app', 'bower_components')}", __dirname))
+
+    tasks.push(task("bower install",  __dirname))
+
+    for r in repos
+        dir = path.join(__dirname, '..', r)
+        if fs.existsSync(dir)
+            tasks.push(task("bower link", dir))
+            tasks.push(task("bower link #{r}", __dirname))
+        else
+            console.log("#{r} does not exist! Did you git clone it? Looked here:", dir)
+
+
+    async.series(tasks, (err) ->
+        console.log("Finished!")
+        gulpCb()
+    )
+)
+
 gulp.task "default", (cb) ->
     runSequence(['clean:compiled', 'clean:tmp']
                 'copy_deps'
@@ -472,7 +742,7 @@ gulp.task "default", (cb) ->
                 'inject',
                 'inject:version'
                 'bower'
-                'copy_fonts'
+                'copy_extras'
                 'webserver'
                 'watch'
                 cb)
@@ -495,10 +765,8 @@ gulp.task "build", (cb) ->
                 'inject',
                 'inject:version'
                 'bower'
-                'copy_fonts'
-                'package:dist'
-                'move_folders'
-                'delete_things')
+                'copy_extras:dist'
+                'package:dist')
 
 if fs.existsSync('./custom_gulp_tasks.coffee')
     require('./custom_gulp_tasks.coffee')(gulp)
