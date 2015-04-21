@@ -1,9 +1,10 @@
 config = require('./config.json')
 fs = require('fs')
 https = require('https')
-httpProxy = require('http-proxy')
 path = require('path')
+httpProxy = require('http-proxy')
 gulp = require("gulp")
+colors = require("colors")
 glob = require("glob")
 sass = require("gulp-sass")
 replace = require("gulp-replace")
@@ -40,6 +41,7 @@ plumber = require('gulp-plumber')
 gutil = require('gulp-util')
 lazypipe = require('lazypipe')
 express = require('express')
+sassGraph = require('gulp-sass-graph')
 
 gulp_src = gulp.src
 
@@ -122,13 +124,8 @@ paths =
         "!"+path.join(BOWER_PATH, '/hn-*/app/bower_components/**/*.*')
     ]
 
+
 pipes = {
-    coffee:
-        lazypipe()
-            .pipe(ngClassify, ngClassifyOptions)
-            .pipe(coffee)
-            .pipe(ngAnnotate)
-            .pipe(gulp.dest, COMPILE_PATH)
     coffeeLint:
         lazypipe()
             .pipe(coffeelint)
@@ -140,6 +137,16 @@ pipes = {
             .pipe(sass, {
                 includePaths: ['.tmp/', 'app/bower_components', 'app']
                 precision: 8
+                onError: (err) ->
+                    file_path = err.file.replace(__dirname, "")
+                    console.log("SASS Error:".red.underline
+                        err.message.bold
+                        'in file'
+                        file_path.bold
+                        'on line'
+                        (err.line+'').bold
+                        'column'
+                        (err.column+'').bold)
             })
             .pipe(sourcemaps.write)
             .pipe(gulp.dest, COMPILE_PATH)
@@ -214,9 +221,6 @@ gulp.task "inject", ->
         "./.compiled/modules/**/*.css"
         "./.compiled/components/**/*.css"
         "./.compiled/modules/"+config.main_module_name+"/"+config.main_module_name+".module.js"
-        "./.compiled/modules/"+config.main_module_name+"/*.provider.js"
-        "./.compiled/modules/"+config.main_module_name+"/*.run.js"
-        "./.compiled/modules/"+config.main_module_name+"/*.js"
         "./.compiled/modules/**/*.module.js"
         "./.compiled/modules/**/*.provider.js"
         "./.compiled/templates.js"
@@ -226,6 +230,10 @@ gulp.task "inject", ->
         "./.compiled/components/**/*.js"
         "!./.compiled/modules/**/tests/*"
         "!./.compiled/modules/**/*.backend.js"
+        "./.compiled/modules/"+config.main_module_name+"/*.provider.js"
+        "./.compiled/modules/"+config.main_module_name+"/*.config.js"
+        "./.compiled/modules/"+config.main_module_name+"/*.run.js"
+        "./.compiled/modules/"+config.main_module_name+"/*.js"
     ], read: false)
 
     return target
@@ -259,6 +267,7 @@ gulp.task "webserver", ->
     proxy = httpProxy.createProxyServer()
 
     proxy.on('proxyReq', (proxyReq, req, res, options) ->
+        proxyReq.setHeader('X-App-Host', req.hostname)
         proxyReq.setHeader('X-App-Token', backend.app_token)
         LOG_PROXY_HEADERS and console.log('proxy request: headers:', proxyReq._headers)
         LOG_PROXY_HEADERS and console.log('proxy request: method:', proxyReq.method)
@@ -275,7 +284,8 @@ gulp.task "webserver", ->
             req.headers['Content-Length'] = '0'
         next()
     )
-    app.all("/api/v#{backend.api_version}/*", (req, res) ->
+    app.all("/api/*", (req, res) ->
+        req.url = req.url.replace('/api', '')
         LOG_PROXY_HEADERS and console.log('proxying ', req.url, 'to', backend.host)
         proxy.web(req, res, {target: backend.host, secure: false, changeOrigin: true, rejectUnauthorized: false})
     )
@@ -318,6 +328,7 @@ gulp.task "bower", ->
 
 gulp.task "sass", ->
     return gulp.src(dedupeGlobs(paths.sass))
+        .pipe(changed(COMPILE_PATH))
         .pipe(pipes.sass())
         .on('error', (e) ->
             console.error("Error in file "+e.fileName+" line "+e.lineNumber+":\n"+e.message)
@@ -333,9 +344,17 @@ gulp.task "templates", ->
         ))
         .pipe(gulp.dest(COMPILE_PATH))
 
+handler = (err) ->
+    console.error(err.message+"  "+err.filename+" line:"+err.location.first_line)
+
 gulp.task "coffee", ->
     return gulp.src(dedupeGlobs(paths.coffee))
-        .pipe(pipes.coffee())
+        .pipe(sourcemaps.init())
+        .pipe(ngClassify(ngClassifyOptions)).on('error', handler)
+        .pipe(coffee()).on('error', handler)
+        .pipe(ngAnnotate())
+        .pipe(sourcemaps.write())
+        .pipe(gulp.dest(COMPILE_PATH))
 
 
 gulp.task "coffee_lint", ->
@@ -624,50 +643,6 @@ gulp.task('build_routes', (cb) ->
     console.log("wrote #{Object.keys(map).length} routes to #{OUTPUT}")
 )
 
-# builds a json file containing all of this application's state urls
-gulp.task('moo', (cb) ->
-    OUTPUT = './poop.html'
-    INPUT = './.compiled/**/*.cmp.js'
-
-    glob = require('glob')
-    path = require('path')
-    vm = require("vm")
-    fs = require("fs")
-
-    components = {}
-
-    kababYum = (str) ->
-        return str.replace(/([A-Z])/g, "-$1").toLowerCase()
-
-    moduleMock =
-        directive: (name, arr) ->
-            ret = arr.pop()()
-            scope = ret.scope
-            components[kababYum(name)] =
-                vars: _.keys(scope)
-                attrs: _.map(_.keys(scope), kababYum)
-                transclude: ret.transclude
-            return moduleMock
-
-    angular =
-        module: (x) ->
-            console.log('module', x)
-            return moduleMock
-
-
-    ctx =
-        angular: angular
-
-
-    for m in glob.sync(INPUT)
-        vm.runInNewContext(fs.readFileSync(m), ctx)
-
-    console.log(components)
-
-
-    #fs.writeFileSync(OUTPUT, JSON.stringify(map, null, "    "))
-    #console.log("wrote #{Object.keys(map).length} routes to #{OUTPUT}")
-)
 
 gulp.task('bower_install', (gulpCb) ->
     exec = require('child_process').exec
