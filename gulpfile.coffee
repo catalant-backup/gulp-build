@@ -74,8 +74,8 @@ if '--verbose' in process.argv
     console.log("====== verbose proxy header logging enabled ======")
 
 gitHash = 'didnt find it yet'
-require('child_process').exec('git rev-parse --verify HEAD', (err, stdout) ->
-    gitHash = stdout
+require('child_process').exec('git log -1 --pretty=format:Hash:%H%nDate:%ai', (err, stdout) ->
+    gitHash = stdout.replace('\n', '<br/>')
 )
 
 COMPILE_PATH = "./.compiled"            # Compiled JS and CSS, Images, served by webserver
@@ -745,7 +745,7 @@ gulp.task "build", (cb) ->
                 'make_config:dist'
                 'sprite'
                 ['coffee', 'sass']
-                'images'
+    #            'images' we dont use this anyway
                 'inject',
                 'inject:version'
                 'bower'
