@@ -55,6 +55,7 @@ gulp.src = ->
   ))
 
 LOG_PROXY_HEADERS = false
+UGLIFY_DEV = false
 isProdBuild = false
 
 if '--staging' in process.argv
@@ -64,11 +65,18 @@ if '--staging' in process.argv
 if '--prod' in process.argv
     isProdBuild = true
 
+if '--ugly' in process.argv
+    UGLIFY_DEV = true
+    console.log("making your code really ugly!!! wait.. that doesnt need a special flag! zing!")
 
 if '--verbose' in process.argv
     LOG_PROXY_HEADERS = true
     console.log("====== verbose proxy header logging enabled ======")
 
+gitHash = 'didnt find it yet'
+require('child_process').exec('git rev-parse --verify HEAD', (err, stdout) ->
+    gitHash = stdout
+)
 
 COMPILE_PATH = "./.compiled"            # Compiled JS and CSS, Images, served by webserver
 TEMP_PATH = "./.tmp"                    # hourlynerd dependencies copied over, uncompiled
@@ -348,11 +356,14 @@ handler = (err) ->
     console.error(err.message+"  "+err.filename+" line:"+err.location.first_line)
 
 gulp.task "coffee", ->
-    return gulp.src(dedupeGlobs(paths.coffee))
+    pipe = gulp.src(dedupeGlobs(paths.coffee))
         .pipe(sourcemaps.init())
         .pipe(ngClassify(ngClassifyOptions)).on('error', handler)
         .pipe(coffee()).on('error', handler)
         .pipe(ngAnnotate())
+    if UGLIFY_DEV
+        pipe = pipe.pipe(uglify())
+    pipe = pipe
         .pipe(sourcemaps.write())
         .pipe(gulp.dest(COMPILE_PATH))
 
@@ -504,7 +515,9 @@ makeConfig = (isDebug, cb) ->
         app_version: bwr.version
         bower_versions: versions
         build_date: new Date()
+        hash: gitHash
     })
+    settings.keys = 'its a secret' #secret stuff in here!
 
 
     template = """
@@ -642,7 +655,6 @@ gulp.task('build_routes', (cb) ->
     fs.writeFileSync(OUTPUT, JSON.stringify(map, null, "    "))
     console.log("wrote #{Object.keys(map).length} routes to #{OUTPUT}")
 )
-
 
 gulp.task('bower_install', (gulpCb) ->
     exec = require('child_process').exec
