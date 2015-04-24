@@ -101,6 +101,7 @@ dedupeGlobs = (globs, root="/modules") ->
                         ignorePaths.push("!"+p)
             )
     )
+    console.log('blogsasf', globs, root)
     return globs.concat(ignorePaths)
 
 
@@ -411,9 +412,8 @@ gulp.task "copy_extras:dist", ->
 gulp.task "ie9fontfix",  ->
     ttembed = require('ttembed-js')
     base = if isProdBuild then DIST_PATH else COMPILE_PATH
-    paths = glob.sync(path.join(__dirname, base, 'fonts', '*.+(ttf|otf)'))
-    done = 0
-    _.each(paths, (p) ->
+    ps = glob.sync(path.join(__dirname, base, 'fonts', '*.+(ttf|otf)'))
+    _.each(ps, (p) ->
         ttembed({filename: p}, (err, oldFsType) ->
             name = p.split('/').pop()
             if err
