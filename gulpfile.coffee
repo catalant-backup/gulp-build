@@ -101,7 +101,6 @@ dedupeGlobs = (globs, root="/modules") ->
                         ignorePaths.push("!"+p)
             )
     )
-    console.log('blogsasf', globs, root)
     return globs.concat(ignorePaths)
 
 
