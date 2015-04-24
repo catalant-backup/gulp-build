@@ -90,8 +90,7 @@ dedupeGlobs = (globs, root="/modules") ->
     deduper = {}
     ignorePaths = []
     re = RegExp("^.*?"+root)
-    globs.forEach((glb) ->
-
+    _.each(globs, (glb) ->
         if glb.charAt(0) != '!'
             glob.sync(glb).forEach((p) ->
                 if p.indexOf('bower_components') <= -1
