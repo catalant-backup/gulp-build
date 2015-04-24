@@ -409,13 +409,12 @@ gulp.task "copy_extras", ->
 gulp.task "copy_extras:dist", ->
     copyExtras('fonts', 'runtimes', DIST_PATH)
 
-gulp.task "ie9fontfix", (cb) ->
+gulp.task "ie9fontfix",  ->
     ttembed = require('ttembed-js')
     base = if isProdBuild then DIST_PATH else COMPILE_PATH
     paths = glob.sync(path.join(__dirname, base, 'fonts', '*.+(ttf|otf)'))
     done = 0
     _.each(paths, (p) ->
-        done += 1
         ttembed({filename: p}, (err, oldFsType) ->
             name = p.split('/').pop()
             if err
@@ -424,9 +423,6 @@ gulp.task "ie9fontfix", (cb) ->
                 console.log(name+' fsType is already 0000; no action taken.')
             else
                 console.log(name+' fsType successfully changed from ' + oldFsType + ' to 0000.')
-            done -=1
-            if done == 0
-                cb()
         )
     )
 
