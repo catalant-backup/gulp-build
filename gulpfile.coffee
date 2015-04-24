@@ -125,7 +125,7 @@ paths =
     templates: pathsForExt('html')
     coffee: pathsForExt('coffee')
     images: pathsForExt('+(png|jpg|gif|jpeg)')
-    fonts: BOWER_PATH + '/**/*.+(woff|woff2|svg|ttf|eot)'
+    fonts: BOWER_PATH + '/**/*.+(woff|woff2|svg|ttf|eot|otf)'
     runtimes: BOWER_PATH + '/**/*.+(xap|swf)'
     assets: [
         path.join(BOWER_PATH, '/hn-*/app/*/**/*.*')
@@ -408,6 +408,28 @@ gulp.task "copy_extras", ->
 
 gulp.task "copy_extras:dist", ->
     copyExtras('fonts', 'runtimes', DIST_PATH)
+
+gulp.task "ie9fontfix", (cb) ->
+    ttembed = require('ttembed-js')
+    base = if isProdBuild then DIST_PATH else COMPILE_PATH
+    paths = glob.sync(path.join(__dirname, base, 'fonts', '*.+(ttf|otf)'))
+    done = 0
+    _.each(paths, (p) ->
+        done += 1
+        ttembed({filename: p}, (err, oldFsType) ->
+            name = p.split('/').pop()
+            if err
+                console.error('ttembed-js: badness', err)
+            if oldFsType == '0000'
+                console.log(name+' fsType is already 0000; no action taken.')
+            else
+                console.log(name+' fsType successfully changed from ' + oldFsType + ' to 0000.')
+            done -=1
+            if done == 0
+                cb()
+        )
+    )
+
 
 gulp.task "images", ->
     return gulp.src(dedupeGlobs(paths.images))
@@ -726,7 +748,7 @@ gulp.task "default", (cb) ->
                 'inject',
                 'inject:version'
                 'bower'
-                'copy_extras'
+                ['copy_extras', 'ie9fontfix']
                 'webserver'
                 'watch'
                 cb)
@@ -745,11 +767,11 @@ gulp.task "build", (cb) ->
                 'make_config:dist'
                 'sprite'
                 ['coffee', 'sass']
-    #            'images' we dont use this anyway
+                'images'
                 'inject',
                 'inject:version'
                 'bower'
-                'copy_extras:dist'
+                ['copy_extras:dist', 'ie9fontfix']
                 'package:dist')
 
 if fs.existsSync('./custom_gulp_tasks.coffee')
