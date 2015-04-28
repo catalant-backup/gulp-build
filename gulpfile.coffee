@@ -408,23 +408,6 @@ gulp.task "copy_extras", ->
 gulp.task "copy_extras:dist", ->
     copyExtras('fonts', 'runtimes', DIST_PATH)
 
-gulp.task "ie9fontfix",  ->
-    ttembed = require('ttembed-js')
-    base = if isProdBuild then DIST_PATH else COMPILE_PATH
-    ps = glob.sync(path.join(__dirname, base, 'fonts', '*.+(ttf|otf)'))
-    _.each(ps, (p) ->
-        ttembed({filename: p}, (err, oldFsType) ->
-            name = p.split('/').pop()
-            if err
-                console.error('ttembed-js: badness', err)
-            if oldFsType == '0000'
-                console.log(name+' fsType is already 0000; no action taken.')
-            else
-                console.log(name+' fsType successfully changed from ' + oldFsType + ' to 0000.')
-        )
-    )
-
-
 gulp.task "images", ->
     return gulp.src(dedupeGlobs(paths.images))
         .pipe(imageop({
@@ -742,7 +725,7 @@ gulp.task "default", (cb) ->
                 'inject',
                 'inject:version'
                 'bower'
-                ['copy_extras', 'ie9fontfix']
+                'copy_extras'
                 'webserver'
                 'watch'
                 cb)
@@ -765,7 +748,7 @@ gulp.task "build", (cb) ->
                 'inject',
                 'inject:version'
                 'bower'
-                ['copy_extras:dist', 'ie9fontfix']
+                'copy_extras:dist'
                 'package:dist')
 
 if fs.existsSync('./custom_gulp_tasks.coffee')
