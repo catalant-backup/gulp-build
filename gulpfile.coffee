@@ -520,6 +520,7 @@ makeConfig = (isDebug, cb) ->
         hash: gitHash
         app_host: config.app_host
     })
+    settings.keys = 'its a secret' #secret stuff in here!
 
     template = """
         angular.module('appConfig', [])
