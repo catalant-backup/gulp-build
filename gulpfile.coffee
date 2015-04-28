@@ -274,7 +274,10 @@ gulp.task "webserver", ->
     proxy = httpProxy.createProxyServer()
 
     proxy.on('proxyReq', (proxyReq, req, res, options) ->
-        proxyReq.setHeader('X-App-Host', req.hostname)
+        if config.app_host
+            proxyReq.setHeader('X-App-Host', config.app_host)
+        else
+            proxyReq.setHeader('X-App-Host', req.hostname)
         proxyReq.setHeader('X-App-Token', backend.app_token)
         LOG_PROXY_HEADERS and console.log('proxy request: headers:', proxyReq._headers)
         LOG_PROXY_HEADERS and console.log('proxy request: method:', proxyReq.method)
@@ -515,9 +518,8 @@ makeConfig = (isDebug, cb) ->
         bower_versions: versions
         build_date: new Date()
         hash: gitHash
+        app_host: config.app_host
     })
-    settings.keys = 'its a secret' #secret stuff in here!
-
 
     template = """
         angular.module('appConfig', [])
