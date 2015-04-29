@@ -58,6 +58,32 @@ LOG_PROXY_HEADERS = false
 UGLIFY_DEV = false
 isProdBuild = false
 
+# read or update local config - no args = read, or update with an object
+local_config = (update) ->
+    LOCAL_CONFIG_FILE = 'config.local.json'
+    cfg = path.join(__dirname, LOCAL_CONFIG_FILE)
+    read = ->
+        if not fs.existsSync(cfg)
+            fs.writeFileSync(cfg, "{}")
+            gi = path.join(__dirname, '.gitignore')
+            giContents = fs.readFileSync(gi)
+            if LOCAL_CONFIG_FILE not in giContents
+                fs.writeFileSync(gi, giContents+"\r\n"+LOCAL_CONFIG_FILE)
+            return {}
+        else
+            try
+                return JSON.parse(fs.readFileSync(cfg))
+            catch e
+                console.error('could not json parse local config file:', cfg, e)
+                return {}
+
+    if arguments.length == 0
+        return read()
+    else
+        json = _.extend(read(), update)
+        fs.writeFileSync(cfg, JSON.stringify(json))
+        return json
+
 if '--staging' in process.argv
     config.dev_server.backend = 'staging'
 
@@ -669,10 +695,11 @@ gulp.task('bower_install', (gulpCb) ->
         .usage('Update or link HN modules from bower')
         .describe('clean', 'install fresh dependencies')
         .describe('link', 'comma separated list of repos to link')
-        .alias('all', 'a')
+        .describe('last', 'link the repos that you linked last time')
         .describe('h', 'print usage')
         .alias('h', 'help')
         .default('link', '')
+        .default('last', '')
 
 
     task = (command, cwd) ->
@@ -690,12 +717,23 @@ gulp.task('bower_install', (gulpCb) ->
         console.log(parser.help())
         return
 
-    console.log("Installing bower components:\n--link: #{args.link}")
+    repos = args.link.split(',')
+
+    command = 'link'
+    if args.link
+        local_config({bower_link: repos})
+
+    if args.last
+        repos = local_config()?.bower_link or []
+        command = 'last'
+
+    console.log("Installing bower components:\n--#{command}: #{repos.join(',')}")
     console.log("--clean: #{(if args.clean then 'Yes' else 'No')}")
     console.log("Starting...")
     console.log("---------------------------------------------")
 
-    repos = args.link.split(',')
+
+
 
     tasks = []
     if args.clean
