@@ -42,6 +42,7 @@ gutil = require('gulp-util')
 lazypipe = require('lazypipe')
 express = require('express')
 sassGraph = require('gulp-sass-graph')
+compression = require('compression')
 
 gulp_src = gulp.src
 
@@ -332,6 +333,7 @@ gulp.task "webserver", ->
             next()
     )
     staticRoot = config.dev_server.staticRoot or "/"
+    app.use(compression())
     app.use(staticRoot, express.static(path.join(__dirname, COMPILE_PATH)))
     app.use(staticRoot, express.static(path.join(__dirname, TEMP_PATH)))
     app.use(staticRoot, express.static(path.join(__dirname, APP_PATH)))
