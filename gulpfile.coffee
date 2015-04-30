@@ -43,7 +43,7 @@ lazypipe = require('lazypipe')
 express = require('express')
 sassGraph = require('gulp-sass-graph')
 compression = require('compression')
-async = require("asyc")
+async = require("async")
 
 gulp_src = gulp.src
 
