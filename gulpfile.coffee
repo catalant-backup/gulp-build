@@ -1,5 +1,6 @@
 config = require('./config.json')
 fs = require('fs')
+async = require('async')
 https = require('https')
 path = require('path')
 httpProxy = require('http-proxy')
@@ -8,8 +9,8 @@ colors = require("colors")
 glob = require("glob")
 sass = require("gulp-sass")
 replace = require("gulp-replace")
-concat = require("gulp-concat")
 sourcemaps = require("gulp-sourcemaps")
+concat = require("gulp-concat")
 watch = require('gulp-watch')
 coffee = require("gulp-coffee")
 sourcemaps = require("gulp-sourcemaps")
@@ -43,7 +44,6 @@ lazypipe = require('lazypipe')
 express = require('express')
 sassGraph = require('gulp-sass-graph')
 compression = require('compression')
-async = require("async")
 
 gulp_src = gulp.src
 
@@ -567,6 +567,7 @@ gulp.task('make_config:dist', (cb) ->
     makeConfig(false, cb)
 )
 
+
 gulp.task "update",  ->
     getRemoteCode = (filename, cb) ->
         console.log("Grabbing latest gulpfile from github...")
@@ -588,12 +589,28 @@ gulp.task "update",  ->
         req.end()
 
     getRemoteCode('gulpfile.coffee', (filename, remoteCode) ->
+        tasks = []
+        remoteCode.replace(/require\(["']([\w\d_-]+)["']\)/g, (str, match) ->
+            try
+                require(match)
+            catch e
+                tasks.push({cmd: "npm install #{match} --save", match: match})
+        )
+        exec = require('child_process').exec
+        require('async').eachSeries(tasks, (task, cb) ->
+            console.log("npm module '#{task.match}' is missing, installing..")
+            exec(task.cmd, (err, stdout) ->
+                console.log("couldnt npm install '#{task.match}' because:", err) if err
+                cb()
+            )
+        )
         localCode = fs.readFileSync("./#{filename}", 'utf8')
         if localCode.length != remoteCode.length
             fs.writeFileSync("./#{filename}", remoteCode)
             console.log("The contents of your #{filename} do not match latest. Updating...")
         else
             console.log("Your #{filename} matches latest. No update required.")
+
     )
 
 # builds a json file containing all of this application's state urls
