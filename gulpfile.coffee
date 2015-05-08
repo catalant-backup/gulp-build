@@ -44,6 +44,7 @@ lazypipe = require('lazypipe')
 express = require('express')
 sassGraph = require('gulp-sass-graph')
 compression = require('compression')
+yargs = require('yargs')
 
 gulp_src = gulp.src
 
@@ -58,7 +59,8 @@ gulp.src = ->
 
 LOG_PROXY_HEADERS = false
 UGLIFY_DEV = false
-isProdBuild = false
+buildEnv = 'dev'
+isProdBuild = false # Deprecated with buildEnv, left here temporarily for legacy purposes.
 
 # read or update local config - no args = read, or update with an object
 local_config = (update) ->
@@ -89,9 +91,15 @@ local_config = (update) ->
 if '--staging' in process.argv
     config.dev_server.backend = 'staging'
 
-
+# Deprecated, use --buildenv argument instead, left here for legacy
 if '--prod' in process.argv
+    buildEnv = 'prod'
     isProdBuild = true
+
+if yargs.argv.buildenv
+    buildEnv = yargs.argv.buildenv
+    if buildEnv == 'prod'
+        isProdBuild = true
 
 if '--ugly' in process.argv
     UGLIFY_DEV = true
@@ -342,13 +350,28 @@ gulp.task "webserver", ->
     app.listen(config.dev_server.port, config.dev_server.host)
     console.log("listening on ", config.dev_server.port)
 
+
+getChildOverrides = (bowerPath) ->
+    configs = glob.sync(bowerPath+"/**/bower.json")
+    overrides = {}
+    configs.forEach((cpath)->
+        _.extend(overrides, require(cpath).overrides or {})
+    )
+    _.extend(overrides, require(path.join(__dirname, "bower.json")).overrides or {})
+    return overrides
+
 gulp.task "bower", ->
     prefix = config.dev_server.staticRoot
+    excludes = config.bower_exclude
+    if buildEnv != 'dev'
+        excludes.push("/angular-reference-app/")
+
     return gulp.src(COMPILE_PATH + "/index.html")
         .pipe(wiredep({
             directory: BOWER_PATH
             ignorePath: '../app/'
-            exclude: config.bower_exclude
+            exclude: excludes
+            overrides: getChildOverrides(BOWER_PATH)
             fileTypes: {
                 html: {
                     block: /(([ \t]*)<!--\s*bower:*(\S*)\s*-->)(\n|\r|.)*?(<!--\s*endbower\s*-->)/gi,
@@ -542,12 +565,13 @@ makeConfig = (isDebug, cb) ->
     if not baseConfig
         console.error(path.join(__dirname, "./config/config_base.coffee")+" needs to exist!")
 
-    settings = baseConfig(isProdBuild, {
+    settings = baseConfig(buildEnv, {
         app_version: bwr.version
         bower_versions: versions
         build_date: new Date()
         hash: gitHash
         app_host: config.app_host
+        build_env: buildEnv
     })
     settings.keys = 'its a secret' #secret stuff in here!
 
