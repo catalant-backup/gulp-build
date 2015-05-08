@@ -573,7 +573,6 @@ makeConfig = (isDebug, cb) ->
         app_host: config.app_host
         build_env: buildEnv
     })
-    settings.keys = 'its a secret' #secret stuff in here!
 
     template = """
         angular.module('appConfig', [])
