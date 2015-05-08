@@ -410,7 +410,7 @@ gulp.task "templates", ->
         .pipe(gulp.dest(COMPILE_PATH))
 
 handler = (err) ->
-    console.error(err.message+"  "+err.filename+" line:"+err.location.first_line)
+    console.error(err.message+"  "+err.filename+" line:"+err.location?.first_line)
 
 gulp.task "coffee", ->
     pipe = gulp.src(dedupeGlobs(paths.coffee))
