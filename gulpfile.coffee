@@ -288,7 +288,7 @@ gulp.task "inject", ->
         ))
         .pipe(gulp.dest(COMPILE_PATH))
 
-gulp.task('inject:version', ->
+gulp.task('inject:build_meta', ->
     return gulp.src(COMPILE_PATH + "/index.html")
         .pipe(inject(gulp.src('./bower.json'),
             starttag: '<!-- build_info -->',
@@ -296,7 +296,7 @@ gulp.task('inject:version', ->
             transform: (filepath, file) ->
                 contents = file.contents.toString('utf8')
                 data = JSON.parse(contents)
-                return "<!-- version: #{data.version} -->"
+                return "<script>HN={env:'#{buildEnv}'};</script>"
         ))
         .pipe(gulp.dest(COMPILE_PATH))
 )
@@ -363,12 +363,15 @@ getChildOverrides = (bowerPath) ->
 gulp.task "bower", ->
     prefix = config.dev_server.staticRoot
     excludes = config.bower_exclude
+    bowerJson = require('./bower.json')
+
     if buildEnv != 'dev'
-        excludes.push("/angular-reference-app/")
+        delete bowerJson.dependencies['hn-docsite']
 
     return gulp.src(COMPILE_PATH + "/index.html")
         .pipe(wiredep({
             directory: BOWER_PATH
+            bowerJson: bowerJson
             ignorePath: '../app/'
             exclude: excludes
             overrides: getChildOverrides(BOWER_PATH)
@@ -804,10 +807,10 @@ gulp.task "default", (cb) ->
                 'copy_deps'
                 'templates'
                 'make_config'
-                'sprite'
+    #            'sprite'
                 ['coffee', 'sass']
                 'inject',
-                'inject:version'
+                'inject:build_meta'
                 'bower'
                 'copy_extras'
                 'webserver'
@@ -826,11 +829,11 @@ gulp.task "build", (cb) ->
                 'copy_deps'
                 'templates'
                 'make_config:dist'
-                'sprite'
+    #            'sprite'
                 ['coffee', 'sass']
                 'images'
                 'inject',
-                'inject:version'
+                'inject:build_meta'
                 'bower'
                 'copy_extras:dist'
                 'package:dist')
