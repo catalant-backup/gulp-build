@@ -88,8 +88,12 @@ local_config = (update) ->
         fs.writeFileSync(cfg, JSON.stringify(json))
         return json
 
+config.dev_server.backend = local_config().backend or "local"
+
 if '--staging' in process.argv
     config.dev_server.backend = 'staging'
+
+console.log("Using Backend: "+config.dev_server.backend.toUpperCase().red.underline)
 
 # Deprecated, use --buildenv argument instead, left here for legacy
 if '--prod' in process.argv
@@ -107,7 +111,7 @@ if '--ugly' in process.argv
 
 if '--verbose' in process.argv
     LOG_PROXY_HEADERS = true
-    console.log("====== verbose proxy header logging enabled ======")
+    console.log("====== verbose proxy header logging enabled ======".red.underline)
 
 gitHash = 'didnt find it yet'
 require('child_process').exec('git log -1 --pretty=format:Hash:%H%nDate:%ai', (err, stdout) ->
