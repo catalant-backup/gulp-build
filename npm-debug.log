@@ -1,0 +1,131 @@
+0 info it worked if it ends with ok
+1 verbose cli [ 'node', '/usr/local/bin/npm', 'publish', '--force' ]
+2 info using npm@2.7.4
+3 info using node@v0.12.2
+4 warn using --force I sure hope you know what you are doing.
+5 verbose publish [ '.' ]
+6 silly cache add args [ '.', null ]
+7 verbose cache add spec .
+8 silly cache add parsed spec { raw: '.',
+8 silly cache add   scope: null,
+8 silly cache add   name: null,
+8 silly cache add   rawSpec: '.',
+8 silly cache add   spec: '/Users/kaelan/work/gulp-build',
+8 silly cache add   type: 'directory' }
+9 verbose addLocalDirectory /Users/kaelan/.npm/hourlynerd-gulp/1.0.8/package.tgz not in flight; packing
+10 verbose tar pack [ '/Users/kaelan/.npm/hourlynerd-gulp/1.0.8/package.tgz',
+10 verbose tar pack   '/Users/kaelan/work/gulp-build' ]
+11 verbose tarball /Users/kaelan/.npm/hourlynerd-gulp/1.0.8/package.tgz
+12 verbose folder /Users/kaelan/work/gulp-build
+13 info prepublish hourlynerd-gulp@1.0.8
+14 verbose addLocalTarball adding from inside cache /Users/kaelan/.npm/hourlynerd-gulp/1.0.8/package.tgz
+15 silly cache afterAdd hourlynerd-gulp@1.0.8
+16 verbose afterAdd /Users/kaelan/.npm/hourlynerd-gulp/1.0.8/package/package.json not in flight; writing
+17 verbose afterAdd /Users/kaelan/.npm/hourlynerd-gulp/1.0.8/package/package.json written
+18 silly publish { name: 'hourlynerd-gulp',
+18 silly publish   version: '1.0.8',
+18 silly publish   description: 'HourlyNerd gulp file',
+18 silly publish   main: 'gulpfile.js',
+18 silly publish   scripts: { test: 'echo "Error: no test specified" && exit 1' },
+18 silly publish   devDependencies:
+18 silly publish    { 'browser-sync': '^2.7.1',
+18 silly publish      browserify: '^10.1.1',
+18 silly publish      'browserify-css': '^0.6.1',
+18 silly publish      'coffee-script': '^1.9.2',
+18 silly publish      coffeeify: '^1.1.0',
+18 silly publish      del: '^1.1.1',
+18 silly publish      gulp: '^3.8.11',
+18 silly publish      'gulp-autoprefixer': '^2.2.0',
+18 silly publish      'gulp-babel': '^5.1.0',
+18 silly publish      'gulp-changed': '^1.2.1',
+18 silly publish      'gulp-coffee': '^2.3.1',
+18 silly publish      'gulp-coffeelint': '^0.4.0',
+18 silly publish      'gulp-concat': '^2.5.2',
+18 silly publish      'gulp-cssmin': '^0.1.7',
+18 silly publish      'gulp-ejs': '^1.1.0',
+18 silly publish      'gulp-flatten': '0.0.4',
+18 silly publish      'gulp-load-plugins': '^0.10.0',
+18 silly publish      'gulp-rename': '^1.2.2',
+18 silly publish      'gulp-sass': '^2.0.0',
+18 silly publish      'gulp-size': '^1.2.1',
+18 silly publish      'gulp-sourcemaps': '^1.5.2',
+18 silly publish      'gulp-strip-debug': '^1.0.2',
+18 silly publish      'gulp-task-loader': '^1.0.8',
+18 silly publish      'gulp-uglify': '^1.2.0',
+18 silly publish      'gulp-util': '^3.0.4',
+18 silly publish      'gulp-webserver': '^0.9.1',
+18 silly publish      lodash: '^3.8.0',
+18 silly publish      mocha: '^2.2.4',
+18 silly publish      'ng-classify': '^4.1.1',
+18 silly publish      parcelify: '^1.1.1',
+18 silly publish      'require-stylify': '^0.4.0',
+18 silly publish      'run-sequence': '^1.1.0',
+18 silly publish      'sass-css-stream': '^0.1.4',
+18 silly publish      through: '^2.3.7',
+18 silly publish      'vinyl-buffer': '^1.0.0',
+18 silly publish      'vinyl-source-stream': '^1.1.0',
+18 silly publish      'vinyl-transform': '^1.0.0',
+18 silly publish      watchify: '^3.2.1',
+18 silly publish      wiredep: '^2.2.2' },
+18 silly publish   repository:
+18 silly publish    { type: 'git',
+18 silly publish      url: 'https://github.com/HourlyNerd/gulp-build.git' },
+18 silly publish   author: '',
+18 silly publish   license: 'ISC',
+18 silly publish   bugs: { url: 'https://github.com/HourlyNerd/gulp-build/issues' },
+18 silly publish   homepage: 'https://github.com/HourlyNerd/gulp-build',
+18 silly publish   readme: '# HourlyNerd gulpfile\n\n```js\nvar gulp = require(\'gulp\');\nvar gulpfile = require(\'hourlynerd-gulp\');\n\ngulpfile(gulp, {\n    config: require(\'./config\')\n});\n```\n',
+18 silly publish   readmeFilename: 'README.md',
+18 silly publish   gitHead: '45146c94cb9537ffd673023d8e3e871d58461df6',
+18 silly publish   _id: 'hourlynerd-gulp@1.0.8',
+18 silly publish   _shasum: 'f736e12ac60df8bf8cc1e34cc37da084dab85e20',
+18 silly publish   _from: '.' }
+19 silly mapToRegistry name hourlynerd-gulp
+20 silly mapToRegistry using default registry
+21 silly mapToRegistry registry https://registry.npmjs.org/
+22 silly mapToRegistry uri https://registry.npmjs.org/hourlynerd-gulp
+23 verbose publish registryBase https://registry.npmjs.org/
+24 silly publish uploading /Users/kaelan/.npm/hourlynerd-gulp/1.0.8/package.tgz
+25 verbose request uri https://registry.npmjs.org/hourlynerd-gulp
+26 verbose request sending authorization for write operation
+27 info attempt registry request try #1 at 4:02:40 PM
+28 verbose request using bearer token for auth
+29 verbose request id d8fed4015f4f1ee4
+30 http request PUT https://registry.npmjs.org/hourlynerd-gulp
+31 http 403 https://registry.npmjs.org/hourlynerd-gulp
+32 verbose headers { 'content-type': 'application/json',
+32 verbose headers   'cache-control': 'max-age=60',
+32 verbose headers   'content-length': '95',
+32 verbose headers   'accept-ranges': 'bytes',
+32 verbose headers   date: 'Thu, 14 May 2015 20:02:38 GMT',
+32 verbose headers   via: '1.1 varnish',
+32 verbose headers   connection: 'keep-alive',
+32 verbose headers   'x-served-by': 'cache-iad2124-IAD',
+32 verbose headers   'x-cache': 'MISS',
+32 verbose headers   'x-cache-hits': '0',
+32 verbose headers   'x-timer': 'S1431633757.441028,VS0,VE567' }
+33 verbose request invalidating /Users/kaelan/.npm/registry.npmjs.org/hourlynerd-gulp on PUT
+34 error publish Failed PUT 403
+35 verbose stack Error: "You cannot publish over the previously published version 1.0.8." : hourlynerd-gulp
+35 verbose stack     at CachingRegistryClient.<anonymous> (/usr/local/lib/node_modules/npm/node_modules/npm-registry-client/lib/request.js:247:14)
+35 verbose stack     at Request._callback (/usr/local/lib/node_modules/npm/node_modules/npm-registry-client/lib/request.js:170:14)
+35 verbose stack     at Request.self.callback (/usr/local/lib/node_modules/npm/node_modules/request/request.js:344:22)
+35 verbose stack     at Request.emit (events.js:110:17)
+35 verbose stack     at Request.<anonymous> (/usr/local/lib/node_modules/npm/node_modules/request/request.js:1239:14)
+35 verbose stack     at Request.emit (events.js:129:20)
+35 verbose stack     at IncomingMessage.<anonymous> (/usr/local/lib/node_modules/npm/node_modules/request/request.js:1187:12)
+35 verbose stack     at IncomingMessage.emit (events.js:129:20)
+35 verbose stack     at _stream_readable.js:908:16
+35 verbose stack     at process._tickCallback (node.js:355:11)
+36 verbose statusCode 403
+37 verbose pkgid hourlynerd-gulp
+38 verbose cwd /Users/kaelan/work/gulp-build
+39 error Darwin 14.1.0
+40 error argv "node" "/usr/local/bin/npm" "publish" "--force"
+41 error node v0.12.2
+42 error npm  v2.7.4
+43 error code E403
+44 error "You cannot publish over the previously published version 1.0.8." : hourlynerd-gulp
+45 error If you need help, you may report this error at:
+45 error     <https://github.com/npm/npm/issues>
+46 verbose exit [ 1, true ]
