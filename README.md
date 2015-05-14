@@ -1,9 +1,10 @@
-# gulp-build
-gulpfile.coffee exists for legacy repos
-
-
-# to use
+# HourlyNerd gulpfile
 
 ```js
-require('hourlynerd-gulp');
+var gulp = require('gulp');
+var gulpfile = require('hourlynerd-gulp');
+
+gulpfile(gulp, {
+    config: require('./config')
+});
 ```
