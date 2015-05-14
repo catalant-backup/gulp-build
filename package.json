@@ -1,6 +1,6 @@
 {
   "name": "hourlynerd-gulp",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "HourlyNerd gulp file",
   "main": "gulpfile.js",
   "scripts": {
