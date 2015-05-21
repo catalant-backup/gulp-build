@@ -45,6 +45,7 @@ express = require('express')
 sassGraph = require('gulp-sass-graph')
 compression = require('compression')
 yargs = require('yargs')
+bless = require('gulp-bless')
 
 gulp_src = gulp.src
 
@@ -59,6 +60,7 @@ gulp.src = ->
 
 LOG_PROXY_HEADERS = false
 UGLIFY_DEV = false
+SERVE_MINFIED = false #serve dist, toggle to true, gulp build, then gulp webserver to see prod like stuffs
 buildEnv = 'dev'
 isProdBuild = false # Deprecated with buildEnv, left here temporarily for legacy purposes.
 
@@ -307,7 +309,10 @@ gulp.task('inject:build_meta', ->
 
 gulp.task "webserver", ->
     fallback = (req, res, next) ->
-        res.sendFile(path.join(__dirname, COMPILE_PATH, "index.html"))
+        if SERVE_MINFIED
+            res.sendFile(path.join(__dirname, DIST_PATH, "index.html"))
+        else
+            res.sendFile(path.join(__dirname, COMPILE_PATH, "index.html"))
 
     backend = config.backends[config.dev_server.backend]
     app = express()
@@ -347,10 +352,14 @@ gulp.task "webserver", ->
     )
     staticRoot = config.dev_server.staticRoot or "/"
     app.use(compression())
-    app.use(staticRoot, express.static(path.join(__dirname, COMPILE_PATH)))
-    app.use(staticRoot, express.static(path.join(__dirname, TEMP_PATH)))
-    app.use(staticRoot, express.static(path.join(__dirname, APP_PATH)))
+    if SERVE_MINFIED
+        app.use(staticRoot, express.static(path.join(__dirname, DIST_PATH)))
+    else
+        app.use(staticRoot, express.static(path.join(__dirname, COMPILE_PATH)))
+        app.use(staticRoot, express.static(path.join(__dirname, TEMP_PATH)))
+        app.use(staticRoot, express.static(path.join(__dirname, APP_PATH)))
     app.use(fallback)
+
     app.listen(config.dev_server.port, config.dev_server.host)
     console.log("listening on ", config.dev_server.port)
 
@@ -499,6 +508,7 @@ gulp.task "package:dist", ->
         .pipe(assets.restore())
         .pipe(useref())
         .pipe(revReplace())
+        .pipe(gulpIf('*.css', bless())) # fix ie9 4096 max selector per file evil
         .pipe(gulp.dest(DIST_PATH))
 
 gulp.task "docs", ['clean:docs'], ->
@@ -660,7 +670,7 @@ gulp.task('build_routes', (cb) ->
         return str.replace(/([A-Z])/g, "_$1").toLowerCase()
 
 
-    parseUrlParams = (url, abstract) ->
+    parseUrlParams = (url='', abstract) ->
         url = url.replace(/{([^:]+)(:\w+)?}/g, (orig, match) -> "<string:" + snakeSnakeIts_A_SNAAAAKE(match) + ">")
         url = url.replace(/\/:(\w+)/g, (orig, match) -> "/<string:" + snakeSnakeIts_A_SNAAAAKE(match) + ">")
         surl = url.split("?")
