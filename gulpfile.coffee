@@ -480,13 +480,15 @@ gulp.task "copy_extras:dist", ->
     copyExtras('fonts', 'runtimes', DIST_PATH)
 
 gulp.task "images", ->
-    return gulp.src(dedupeGlobs(paths.images))
-        .pipe(imageop({
-            optimizationLevel: 5
-            progressive: true
-            interlaced: true
-        }))
-        .pipe(gulp.dest(DIST_PATH))
+    if buildEnv == 'prod'
+        # This task takes FOREVAR on CI
+        return gulp.src(dedupeGlobs(paths.images))
+            .pipe(imageop({
+                optimizationLevel: 5
+                progressive: true
+                interlaced: true
+            }))
+            .pipe(gulp.dest(DIST_PATH))
 
 #gulp.task "add_banner", ->
 #    banner = """// <%= file.path %>"""
