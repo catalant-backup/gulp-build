@@ -45,7 +45,6 @@ express = require('express')
 sassGraph = require('gulp-sass-graph')
 compression = require('compression')
 yargs = require('yargs')
-bless = require('gulp-bless')
 
 gulp_src = gulp.src
 
@@ -74,7 +73,7 @@ local_config = (update) ->
             gi = path.join(__dirname, '.gitignore')
             giContents = fs.readFileSync(gi)
             if LOCAL_CONFIG_FILE not in giContents
-                fs.writeFileSync(gi, giContents+"\r\n"+LOCAL_CONFIG_FILE)
+                fs.writeFileSync(gi, giContents+"\r\n"+LOCAL_CONFIG_FILE, null, "    ")
             return {}
         else
             try
@@ -480,15 +479,13 @@ gulp.task "copy_extras:dist", ->
     copyExtras('fonts', 'runtimes', DIST_PATH)
 
 gulp.task "images", ->
-    if buildEnv == 'prod'
-        # This task takes FOREVAR on CI
-        return gulp.src(dedupeGlobs(paths.images))
-            .pipe(imageop({
-                optimizationLevel: 5
-                progressive: true
-                interlaced: true
-            }))
-            .pipe(gulp.dest(DIST_PATH))
+    return gulp.src(dedupeGlobs(paths.images))
+        .pipe(imageop({
+            optimizationLevel: 5
+            progressive: true
+            interlaced: true
+        }))
+        .pipe(gulp.dest(DIST_PATH))
 
 #gulp.task "add_banner", ->
 #    banner = """// <%= file.path %>"""
@@ -746,7 +743,7 @@ gulp.task('build_routes', (cb) ->
     console.log("wrote #{Object.keys(map).length} routes to #{OUTPUT}")
 )
 
-gulp.task('bower_install', (gulpCb) ->
+bower_install = (gulpCb) ->
     exec = require('child_process').exec
     path = require('path')
     async = require('async')
@@ -757,7 +754,7 @@ gulp.task('bower_install', (gulpCb) ->
         .usage('Update or link HN modules from bower')
         .describe('clean', 'install fresh dependencies')
         .describe('link', 'comma separated list of repos to link')
-        .describe('last', 'link the repos that you linked last time')
+        .describe('fav', "link favorite repos for project. found in config.local.json as 'link_favorites:[]'")
         .describe('h', 'print usage')
         .alias('h', 'help')
         .default('link', '')
@@ -782,12 +779,10 @@ gulp.task('bower_install', (gulpCb) ->
     repos = args.link.split(',')
 
     command = 'link'
-    if args.link
-        local_config({bower_link: repos})
 
-    if args.last
-        repos = local_config()?.bower_link or []
-        command = 'last'
+    if args.fav
+        repos = local_config()?.link_favorites or []
+        command = 'fav'
 
     console.log("Installing bower components:\n--#{command}: #{repos.join(',')}")
     console.log("--clean: #{(if args.clean then 'Yes' else 'No')}")
@@ -816,7 +811,9 @@ gulp.task('bower_install', (gulpCb) ->
         console.log("Finished!")
         gulpCb()
     )
-)
+
+gulp.task('bower_install', bower_install)
+gulp.task('b', bower_install)
 
 gulp.task "default", (cb) ->
     runSequence(['clean:compiled', 'clean:tmp']
