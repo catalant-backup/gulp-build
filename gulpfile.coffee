@@ -45,6 +45,7 @@ express = require('express')
 sassGraph = require('gulp-sass-graph')
 compression = require('compression')
 yargs = require('yargs')
+bless = require('gulp-bless')
 
 gulp_src = gulp.src
 
