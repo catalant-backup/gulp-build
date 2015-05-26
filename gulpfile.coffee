@@ -74,7 +74,7 @@ local_config = (update) ->
             gi = path.join(__dirname, '.gitignore')
             giContents = fs.readFileSync(gi)
             if LOCAL_CONFIG_FILE not in giContents
-                fs.writeFileSync(gi, giContents+"\r\n"+LOCAL_CONFIG_FILE, null, "    ")
+                fs.writeFileSync(gi, giContents+"\r\n"+LOCAL_CONFIG_FILE)
             return {}
         else
             try
@@ -87,7 +87,7 @@ local_config = (update) ->
         return read()
     else
         json = _.extend(read(), update)
-        fs.writeFileSync(cfg, JSON.stringify(json))
+        fs.writeFileSync(cfg, JSON.stringify(json, null, "    "))
         return json
 
 config.dev_server.backend = local_config().backend or "local"
@@ -480,13 +480,17 @@ gulp.task "copy_extras:dist", ->
     copyExtras('fonts', 'runtimes', DIST_PATH)
 
 gulp.task "images", ->
-    return gulp.src(dedupeGlobs(paths.images))
-        .pipe(imageop({
-            optimizationLevel: 5
-            progressive: true
-            interlaced: true
-        }))
-        .pipe(gulp.dest(DIST_PATH))
+    if buildEnv == 'prod'
+        # This task takes FOREVAR on CI
+        return gulp.src(dedupeGlobs(paths.images))
+            .pipe(imageop({
+                optimizationLevel: 5
+                progressive: true
+                interlaced: true
+            }))
+            .pipe(gulp.dest(DIST_PATH))
+    else
+        return gulp.src(dedupeGlobs(paths.images)).pipe(gulp.dest(DIST_PATH))
 
 #gulp.task "add_banner", ->
 #    banner = """// <%= file.path %>"""
@@ -777,7 +781,7 @@ bower_install = (gulpCb) ->
         console.log(parser.help())
         return
 
-    repos = args.link.split(',')
+    repos = args.link.trim().split(',')
 
     command = 'link'
 
@@ -800,13 +804,17 @@ bower_install = (gulpCb) ->
     tasks.push(task("bower install",  __dirname))
 
     for r in repos
+        continue if r == ''
         dir = path.join(__dirname, '..', r)
-        if fs.existsSync(dir)
-            tasks.push(task("bower link", dir))
-            tasks.push(task("bower link #{r}", __dirname))
+        destLink = path.join(__dirname, BOWER_PATH, r)
+        if not fs.existsSync(destLink) or destLink == fs.realpathSync(destLink)
+            if fs.existsSync(dir)
+                tasks.push(task("bower link", dir))
+                tasks.push(task("bower link #{r}", __dirname))
+            else
+                console.log("#{r} does not exist! Did you git clone it? Looked here:", dir)
         else
-            console.log("#{r} does not exist! Did you git clone it? Looked here:", dir)
-
+            console.log("#{dir}> (already linked)")
 
     async.series(tasks, (err) ->
         console.log("Finished!")
