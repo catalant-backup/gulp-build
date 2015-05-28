@@ -783,23 +783,37 @@ bower_install = (gulpCb) ->
 
     repos = args.link.trim().split(',')
 
-    command = 'link'
-
     if args.fav
         repos = local_config()?.link_favorites or []
-        command = 'fav'
 
-    console.log("Installing bower components:\n--#{command}: #{repos.join(',')}")
-    console.log("--clean: #{(if args.clean then 'Yes' else 'No')}")
-    console.log("Starting...")
+    bowerJsonPath = path.join(__dirname, 'bower.json')
+    bowerJson = require(bowerJsonPath)
+    revertBowerJson = false
+    if buildEnv == 'prod'
+        console.log('adding bower prod dependency overrides')
+        _.each(bowerJson.dependencies, (doNotWant, name) ->
+            overrideVersion = bowerJson.prodOverrides?[name]
+            if overrideVersion
+                bowerJson.dependencies[name] = overrideVersion
+                console.log("#{name}: using [#{overrideVersion}] instead of [#{doNotWant}]")
+        )
+        fs.writeFileSync(bowerJsonPath, JSON.stringify(bowerJson, null, '    '))
+        revertBowerJson = true
+        args.clean = true
+
+
+    console.log("Installing bower components...")
+    if args.clean
+        console.log('Cleaning!')
+    if repos.join(', ')
+        console.log('Linking: ', repos.join(', '))
     console.log("---------------------------------------------")
-
-
 
 
     tasks = []
     if args.clean
         tasks.push(task("rm -rf #{path.join(__dirname, 'app', 'bower_components')}", __dirname))
+        tasks.push(task("bower cache clean", __dirname))
 
     tasks.push(task("bower install",  __dirname))
 
@@ -815,6 +829,9 @@ bower_install = (gulpCb) ->
                 console.log("#{r} does not exist! Did you git clone it? Looked here:", dir)
         else
             console.log("#{dir}> (already linked)")
+
+    if revertBowerJson
+        tasks.push(task("git checkout #{bowerJsonPath}", __dirname))
 
     async.series(tasks, (err) ->
         console.log("Finished!")
