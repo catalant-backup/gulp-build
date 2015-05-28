@@ -381,6 +381,9 @@ gulp.task "bower", ->
     if buildEnv != 'dev'
         delete bowerJson.dependencies['hn-docsite']
 
+    if buildEnv == 'prod'
+        mergeProdBowerOverrides(bowerJson, false)
+
     return gulp.src(COMPILE_PATH + "/index.html")
         .pipe(wiredep({
             directory: BOWER_PATH
@@ -748,6 +751,14 @@ gulp.task('build_routes', (cb) ->
     console.log("wrote #{Object.keys(map).length} routes to #{OUTPUT}")
 )
 
+mergeProdBowerOverrides = (bowerJson, log=true) ->
+    _.each(bowerJson.dependencies, (doNotWant, name) ->
+        overrideVersion = bowerJson.prodOverrides?[name]
+        if overrideVersion
+            bowerJson.dependencies[name] = overrideVersion
+            console.log("#{name}: using [#{overrideVersion}] instead of [#{doNotWant}]") if log
+    )
+
 bower_install = (gulpCb) ->
     exec = require('child_process').exec
     path = require('path')
@@ -791,12 +802,7 @@ bower_install = (gulpCb) ->
     revertBowerJson = false
     if buildEnv == 'prod'
         console.log('adding bower prod dependency overrides')
-        _.each(bowerJson.dependencies, (doNotWant, name) ->
-            overrideVersion = bowerJson.prodOverrides?[name]
-            if overrideVersion
-                bowerJson.dependencies[name] = overrideVersion
-                console.log("#{name}: using [#{overrideVersion}] instead of [#{doNotWant}]")
-        )
+        mergeProdBowerOverrides(bowerJson)
         fs.writeFileSync(bowerJsonPath, JSON.stringify(bowerJson, null, '    '))
         revertBowerJson = true
         args.clean = true
