@@ -46,6 +46,7 @@ sassGraph = require('gulp-sass-graph')
 compression = require('compression')
 yargs = require('yargs')
 bless = require('gulp-bless')
+cache = require('gulp-cache')
 
 gulp_src = gulp.src
 
@@ -483,11 +484,11 @@ gulp.task "images", ->
     if buildEnv == 'prod'
         # This task takes FOREVAR on CI
         return gulp.src(dedupeGlobs(paths.images))
-            .pipe(imageop({
+            .pipe(cache(imageop({
                 optimizationLevel: 5
                 progressive: true
                 interlaced: true
-            }))
+            })))
             .pipe(gulp.dest(DIST_PATH))
     else
         return gulp.src(dedupeGlobs(paths.images)).pipe(gulp.dest(DIST_PATH))
