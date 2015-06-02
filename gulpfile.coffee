@@ -499,19 +499,37 @@ gulp.task "images", ->
 #    .pipe(header(banner, file: {path: 'foo'}))
 #    .pipe(gulp.dest(DIST_PATH))
 
-
-gulp.task "package:dist", ->
+gulp.task "package-no-min:dist", ->
     assets = useref.assets()
+    
     return gulp.src(COMPILE_PATH + "/index.html")
+        .pipe(rename({ extname: ".nomin.html" }))
         .pipe(assets)
         .pipe(gulpIf('*.js', ngAnnotate()))
-        .pipe(gulpIf('*.js', uglify()))
         .pipe(gulpIf('*.css', minifyCss({
             compatibility: 'colors.opacity' # ie doesnt like rgba values :P
         })))
         .pipe(rev())
         .pipe(assets.restore())
         .pipe(useref())
+        .pipe(revReplace())
+        .pipe(gulpIf('*.css', bless())) # fix ie9 4096 max selector per file evil
+        .pipe(gulp.dest(DIST_PATH))
+
+gulp.task "package:dist", ["package-no-min:dist"], ->
+    assets = useref.assets()
+    return gulp.src(COMPILE_PATH + "/index.html")
+        .pipe(assets)
+        .pipe(gulpIf('*.js', ngAnnotate()))
+        .pipe(gulpIf('*.css', minifyCss({
+            compatibility: 'colors.opacity' # ie doesnt like rgba values :P
+        })))
+        .pipe(rev())
+        .pipe(assets.restore())
+        .pipe(useref())
+        .pipe(gulpIf('*.js', uglify()))
+        .pipe(gulpIf('*.js', rename({ extname: '.min.js' })))
+        .pipe(gulpIf('*.css', rename({ extname: '.min.css' })))
         .pipe(revReplace())
         .pipe(gulpIf('*.css', bless())) # fix ie9 4096 max selector per file evil
         .pipe(gulp.dest(DIST_PATH))
