@@ -188,11 +188,11 @@ pipes = {
                 includePaths: ['.tmp/', 'app/bower_components', 'app']
                 precision: 8
                 onError: (err) ->
-                    file_path = err.file.replace(__dirname, "")
+                    file_path = err.file?.replace(__dirname, "")
                     console.log("SASS Error:".red.underline
                         err.message.bold
                         'in file'
-                        file_path.bold
+                        file_path?.bold
                         'on line'
                         (err.line+'').bold
                         'column'
