@@ -13,7 +13,6 @@ sourcemaps = require("gulp-sourcemaps")
 concat = require("gulp-concat")
 watch = require('gulp-watch')
 coffee = require("gulp-coffee")
-sourcemaps = require("gulp-sourcemaps")
 changed = require("gulp-changed")
 wiredep = require("wiredep").stream
 templateCache = require("gulp-angular-templatecache")
@@ -105,7 +104,7 @@ if '--prod' in process.argv
 
 if yargs.argv.buildenv
     buildEnv = yargs.argv.buildenv
-    if buildEnv == 'prod'
+    if buildEnv in ['prod', 'demo']
         isProdBuild = true
 
 if '--ugly' in process.argv
@@ -121,12 +120,22 @@ require('child_process').exec('git log -1 --pretty=format:Hash:%H%nDate:%ai', (e
     gitHash = stdout.replace('\n', '<br/>')
 )
 
+gitBranch = 'didnt find it yet'
+require('child_process').exec('git rev-parse --abbrev-ref HEAD', (err, stdout) ->
+    gitBranch = stdout.replace('\n', '')
+)
+
+
 COMPILE_PATH = "./.compiled"            # Compiled JS and CSS, Images, served by webserver
 TEMP_PATH = "./.tmp"                    # hourlynerd dependencies copied over, uncompiled
 APP_PATH = "./app"                      # this module's precompiled CS and SASS
 BOWER_PATH = "./app/bower_components"   # this module's bower dependencies
 DOCS_PATH = './docs'
 DIST_PATH = './dist'
+
+# Used by gulp-cache to get a unique cache dir by branch/app_name
+gulpCache = ->
+    return new cache.Cache({ cacheDirName: 'gulp-cache/' + gitBranch + '/' + config.app_name })
 
 dedupeGlobs = (globs, root="/modules") ->
     #expand globs arrays, dedupe paths after 'root' in order of arrival. return a new glob array ignoring dupes
@@ -481,17 +490,13 @@ gulp.task "copy_extras:dist", ->
     copyExtras('fonts', 'runtimes', DIST_PATH)
 
 gulp.task "images", ->
-    if buildEnv == 'prod'
-        # This task takes FOREVAR on CI
-        return gulp.src(dedupeGlobs(paths.images))
-            .pipe(cache(imageop({
-                optimizationLevel: 5
-                progressive: true
-                interlaced: true
-            })))
-            .pipe(gulp.dest(DIST_PATH))
-    else
-        return gulp.src(dedupeGlobs(paths.images)).pipe(gulp.dest(DIST_PATH))
+    return gulp.src(dedupeGlobs(paths.images))
+        .pipe(cache(imageop({
+            optimizationLevel: 5
+            progressive: true
+            interlaced: true
+        }), {fileCache: gulpCache()}))
+        .pipe(gulp.dest(DIST_PATH))
 
 #gulp.task "add_banner", ->
 #    banner = """// <%= file.path %>"""
@@ -520,6 +525,7 @@ gulp.task "package:dist", ["package-no-min:dist"], ->
     assets = useref.assets()
     return gulp.src(COMPILE_PATH + "/index.html")
         .pipe(assets)
+        .pipe(gulpIf('*.js', sourcemaps.init()))
         .pipe(gulpIf('*.js', ngAnnotate()))
         .pipe(gulpIf('*.css', minifyCss({
             compatibility: 'colors.opacity' # ie doesnt like rgba values :P
@@ -532,6 +538,9 @@ gulp.task "package:dist", ["package-no-min:dist"], ->
         .pipe(gulpIf('*.css', rename({ extname: '.min.css' })))
         .pipe(revReplace())
         .pipe(gulpIf('*.css', bless())) # fix ie9 4096 max selector per file evil
+        .pipe(gulpIf('*.js', sourcemaps.write('.')))
+        # Cheap trick to fix source map URL
+        .pipe(gulpIf('*.js', replace('//# sourceMappingURL=..', '//# sourceMappingURL=')))
         .pipe(gulp.dest(DIST_PATH))
 
 gulp.task "docs", ['clean:docs'], ->
