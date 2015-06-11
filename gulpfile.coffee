@@ -491,11 +491,11 @@ gulp.task "copy_extras:dist", ->
 
 gulp.task "images", ->
     return gulp.src(dedupeGlobs(paths.images))
-        .pipe(cache(imageop({
+        .pipe(imageop({
             optimizationLevel: 5
             progressive: true
             interlaced: true
-        }), {fileCache: gulpCache()}))
+        }))
         .pipe(gulp.dest(DIST_PATH))
 
 #gulp.task "add_banner", ->
