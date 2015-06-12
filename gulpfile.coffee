@@ -46,6 +46,7 @@ compression = require('compression')
 yargs = require('yargs')
 bless = require('gulp-bless')
 cache = require('gulp-cache')
+ignore = require('gulp-ignore')
 
 gulp_src = gulp.src
 
@@ -437,6 +438,7 @@ handler = (err) ->
 
 gulp.task "coffee", ->
     pipe = gulp.src(dedupeGlobs(paths.coffee))
+        .pipe(ignore(/index\.coffee$/))
         .pipe(sourcemaps.init())
         .pipe(ngClassify(ngClassifyOptions)).on('error', handler)
         .pipe(coffee()).on('error', handler)
@@ -491,11 +493,11 @@ gulp.task "copy_extras:dist", ->
 
 gulp.task "images", ->
     return gulp.src(dedupeGlobs(paths.images))
-        .pipe(imageop({
+        .pipe(cache(imageop({
             optimizationLevel: 5
             progressive: true
             interlaced: true
-        }))
+        }), {fileCache: gulpCache()}))
         .pipe(gulp.dest(DIST_PATH))
 
 #gulp.task "add_banner", ->
