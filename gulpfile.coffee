@@ -287,6 +287,7 @@ gulp.task "inject", ->
         "./.compiled/config.js"
         "./.compiled/modules/**/*.run.js"
         "./.compiled/modules/**/*.js"
+        "./.compiled/components/**/*.module.js"
         "./.compiled/components/**/*.js"
         "!./.compiled/modules/**/tests/*"
         "!./.compiled/modules/**/*.backend.js"
