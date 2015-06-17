@@ -528,7 +528,6 @@ gulp.task "package:dist", ["package-no-min:dist"], ->
     assets = useref.assets()
     return gulp.src(COMPILE_PATH + "/index.html")
         .pipe(assets)
-        .pipe(gulpIf('*.js', sourcemaps.init()))
         .pipe(gulpIf('*.js', ngAnnotate()))
         .pipe(gulpIf('*.css', minifyCss({
             compatibility: 'colors.opacity' # ie doesnt like rgba values :P
@@ -536,6 +535,7 @@ gulp.task "package:dist", ["package-no-min:dist"], ->
         .pipe(rev())
         .pipe(assets.restore())
         .pipe(useref())
+        .pipe(gulpIf('*.js', sourcemaps.init()))
         .pipe(gulpIf('*.js', uglify()))
         .pipe(gulpIf('*.js', rename({ extname: '.min.js' })))
         .pipe(gulpIf('*.css', rename({ extname: '.min.css' })))
