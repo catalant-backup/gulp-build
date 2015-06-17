@@ -425,12 +425,12 @@ gulp.task "sass", ->
         )
 
 gulp.task "templates", ->
+    banner = """<![CDATA[ ${ file.path } ]]>""" #cdata gets around 'directives can only have one root'
     return gulp.src(dedupeGlobs(paths.templates))
-        .pipe(templateCache("templates.js",
+        .pipe(header(banner))
+        .pipe(templateCache("templates.js"
             module: config.app_name
             root: '/'
-            htmlmin:
-                removeComments: true
         ))
         .pipe(gulp.dest(COMPILE_PATH))
 
