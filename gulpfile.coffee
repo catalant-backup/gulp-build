@@ -64,7 +64,7 @@ parcelify = require('parcelify')
 uglify = require('gulp-uglify')
 cssmin = require('gulp-cssmin')
 aliasify = require('aliasify')
-sassify = require('sassify')
+scssify = require('scssify')
 ngHtml2Js = require('browserify-ng-html2js')
 browserify_ngannotate = require('browserify-ngannotate')
 
@@ -72,6 +72,10 @@ bowerResolve = require('bower-resolve')
 nodeResolve = require('resolve')
 debowerify = require('debowerify')
 remapify = require('remapify')
+
+#SegfaultHandler = require('segfault-handler')
+#SegfaultHandler.registerHandler()
+
 
 gulp_src = gulp.src
 
@@ -130,7 +134,7 @@ if '--prod' in process.argv
 
 if yargs.argv.buildenv
     buildEnv = yargs.argv.buildenv
-    if buildEnv == 'prod'
+    if buildEnv in ['prod', 'demo']
         isProdBuild = true
 
 if '--ugly' in process.argv
@@ -146,12 +150,22 @@ require('child_process').exec('git log -1 --pretty=format:Hash:%H%nDate:%ai', (e
     gitHash = stdout.replace('\n', '<br/>')
 )
 
+gitBranch = 'didnt find it yet'
+require('child_process').exec('git rev-parse --abbrev-ref HEAD', (err, stdout) ->
+    gitBranch = stdout.replace('\n', '')
+)
+
+
 COMPILE_PATH = "./.compiled"            # Compiled JS and CSS, Images, served by webserver
 TEMP_PATH = "./.tmp"                    # hourlynerd dependencies copied over, uncompiled
 APP_PATH = "./app"                      # this module's precompiled CS and SASS
 BOWER_PATH = "./app/bower_components"   # this module's bower dependencies
 DOCS_PATH = './docs'
 DIST_PATH = './dist'
+
+# Used by gulp-cache to get a unique cache dir by branch/app_name
+gulpCache = ->
+    return new cache.Cache({ cacheDirName: 'gulp-cache/' + gitBranch + '/' + config.app_name })
 
 dedupeGlobs = (globs, root="/modules") ->
     #expand globs arrays, dedupe paths after 'root' in order of arrival. return a new glob array ignoring dupes
@@ -205,82 +219,6 @@ paths =
     ]
 
 
-pipes = {
-    coffeeLint:
-        lazypipe()
-            .pipe(coffeelint)
-            .pipe(coffeelint.reporter)
-            .pipe(gulp.dest, COMPILE_PATH)
-    sass:
-        lazypipe()
-            .pipe(sourcemaps.init)
-            .pipe(sass, {
-                includePaths: ['.tmp/', 'app/bower_components', 'app']
-                precision: 8
-                onError: (err) ->
-                    file_path = err.file?.replace(__dirname, "")
-                    console.log("SASS Error:".red.underline
-                        err.message.bold
-                        'in file'
-                        file_path?.bold
-                        'on line'
-                        (err.line+'').bold
-                        'column'
-                        (err.column+'').bold)
-            })
-            .pipe(sourcemaps.write)
-            .pipe(gulp.dest, COMPILE_PATH)
-}
-
-
-gulp.task 'make_index', (cb) ->
-    console.log(_.map(glob.sync("./tmp/modules/marketing_public/**/*.coffee"), (t) ->
-        p = path.relative(path.join(__dirname, './app/modules/marketing_public'), t)
-        return "require('./#{p}')"
-    ).join("\n"))
-
-gulp.task 'watch', (cb) ->
-    watch(APP_PATH+'/index.html', ->
-        runSequence('inject', 'bower')
-    )
-    types = '/**/*.+(js|css|coffee|html|scss)'
-    assets = [APP_PATH+"/modules"+types, APP_PATH+"/components"+types]
-
-    _.each(glob.sync(path.join(BOWER_PATH, 'hn-*')), (p) ->
-        resolved = fs.realpathSync(p)
-        if resolved != p
-            assets.push(path.join(resolved, 'app/modules'+types))
-            assets.push(path.join(resolved, 'app/components'+types))
-    )
-
-    watch(assets , followSymlinks: false, (v) ->
-        tasks = []
-        pre = (cb) ->
-            cb()
-        ext = path.extname(v.path).toLowerCase()
-        if ext == '.scss'
-            tasks = ['sass', 'inject', 'bower']
-        if ext == '.coffee'
-            tasks = ['coffee', 'inject', 'bower']
-        if ext == '.html'
-            tasks = ['templates']
-        assetPath = v.path
-        if v.path.indexOf(__dirname) != 0 # this path comes from within the bower components dir
-            pre = (cb) ->
-                assetPath = v.path.replace(/^.*?\/app\//, TEMP_PATH+"/") # gets put here next
-                copyDeps(gulp.src(v.path, {
-                    dot: true
-                    base: BOWER_PATH
-                }), cb)
-
-        if tasks.length
-            console.log('change:', v.path)
-            pre( ->
-                runSequence.apply(runSequence, tasks)
-            )
-        return
-    )
-    cb()
 
 gulp.task "clean:compiled",  ->
     return gulp.src(COMPILE_PATH)
@@ -288,11 +226,6 @@ gulp.task "clean:compiled",  ->
 
 gulp.task "clean:tmp",  ->
     return gulp.src(TEMP_PATH)
-        .pipe(vinylPaths(del))
-
-
-gulp.task "clean:docs",  ->
-    return gulp.src(DOCS_PATH)
         .pipe(vinylPaths(del))
 
 
@@ -429,7 +362,6 @@ gulp.task 'bundle:dev', () ->
         aliases["./"+path.relative('./app/overrides/', fn)] = fn
     )
 
-    console.log('aliases', aliases)
 
 
     externals = []
@@ -443,7 +375,6 @@ gulp.task 'bundle:dev', () ->
                 resolved = bowerResolve.fastReadSync(name)
                 relative = "./"+path.relative(path.join(__dirname, 'app'), resolved)
                 b.require(resolved, expose: relative)
-                console.log("extern", relative, resolved)
                 externals.push(relative)
             )
 
@@ -498,8 +429,9 @@ gulp.task 'bundle:dev', () ->
         )
 #        .plugin('parcelify', {
 #            bundles: {
-#                style: './.tmp/assets/bundle.css'
+#                style: './.compiled/bundle/app.css'
 #            },
+#            appTransformDirs: ['./app/', './app/bower_components/', './app/bower_components/hn-core/app/']
 #            watch: true
 #        })
 #        .plugin(remapify, [
@@ -512,14 +444,26 @@ gulp.task 'bundle:dev', () ->
 #                    return path.join(dirname, basename.replace('foo', 'bar'))
 #            }
 #        ])
-#        .transform(sassify,
-#            'auto-inject': true # Inject css directly in the code
-#            base64Encode: false # Use base64 to inject css
-#            sourceMap: not isProdBuild # Add source map to the code
-#            includePaths: ['./app/', './app/bower_components/']
-#        )
+        .transform(scssify,
+            autoInject: # autoInject may be set to true to use defaults
+                verbose: true # verbose adds data-href path to the file when styleTag is used
+                styleTag: false # When styleTag is false, a <link> tag is used
+
+            # To turn off autoInject, set autoInject to false
+            # 'autoInject': false,
+            sass:  #Full sass options
+                sourceComments: false
+                sourceMap: true
+                sourceMapEmbed: true
+                sourceMapContents: true
+                outputStyle: if isProdBuild then 'compressed' else 'nested'
+                includePaths: ['./app/', './app/bower_components/', './app/bower_components/hn-core/app/']
+                precision: 8
+            postcss: false
+            rootDir: process.cwd()
+        )
         .transform((file) ->
-            return through() if not (/\.(html|scss)$/i).test(file)
+            return through() if not (/\.(html)$/i).test(file)
             #ignore html files for now
             console.log("remove htmlness", file)
             return through((->), ->
@@ -538,9 +482,8 @@ gulp.task 'bundle:dev', () ->
             .pipe(source('./app/app.js'))
             .on('error', gutil.log.bind(gutil, 'Browserify Error'))
             .pipe(buffer())
-    #        .pipe(ngAnnotate())
-      #      .pipe(sourcemaps.init(loadMaps: true))
-    #        .pipe(sourcemaps.write())
+            .pipe(sourcemaps.init(loadMaps: true))
+            .pipe(sourcemaps.write())
             .pipe($.flatten())
             .pipe(gulp.dest('.compiled/bundle', {base: '.compiled'}))
             .on('end', ->
@@ -551,69 +494,6 @@ gulp.task 'bundle:dev', () ->
     bundler.on('update', rebundle)
     return
 
-#gulp.task "bundle:vendor", ->
-#    # this task will go through ./bower.json and
-#    # uses bower-resolve to resolve its full path.
-#    # the full path will then be added to the bundle using require()
-#    b = browserify(debug: not isProdBuild)
-#    # get all bower components ids and use 'bower-resolve' to resolve
-#    # the ids to their full path, which we need for require()
-#    getBowerPackageIds().forEach((id) ->
-#        resolvedPath = bowerResolve.fastReadSync(id)
-#        b.require(resolvedPath, expose: id)
-#    )
-#    # do the similar thing, but for npm-managed modules.
-#    # resolve path using 'resolve' module
-#    getNPMPackageIds().forEach((id) ->
-#        b.require(nodeResolve.sync(id), expose: id)
-#    )
-#    stream = b.bundle()
-#        .pipe(source('./compiled/bundle/vendor.js'))
-#        .on('error', gutil.log.bind(gutil, 'Browserify Error'))
-#    # pipe additional tasks here (for eg: minifying / uglifying, etc)
-#    # remember to turn off name-mangling if needed when uglifying
-#    stream.pipe(gulp.dest('./public/dist'))
-#    return stream
-#
-
-gulp.task "bower", ->
-    prefix = config.dev_server.staticRoot
-    excludes = config.bower_exclude
-    bowerJson = require('./bower.json')
-
-    if buildEnv != 'dev'
-        delete bowerJson.dependencies['hn-docsite']
-
-    return gulp.src(COMPILE_PATH + "/index.html")
-        .pipe(wiredep({
-            directory: BOWER_PATH
-            bowerJson: bowerJson
-            ignorePath: '../app/'
-            exclude: excludes
-            overrides: getChildOverrides(BOWER_PATH)
-            fileTypes: {
-                html: {
-                    block: /(([ \t]*)<!--\s*bower:*(\S*)\s*-->)(\n|\r|.)*?(<!--\s*endbower\s*-->)/gi,
-                    detect: {
-                        js: /<script.*src=['"]([^'"]+)/gi,
-                        css: /<link.*href=['"]([^'"]+)/gi
-                    },
-                    replace: {
-                        js: '<script src="'+prefix+'{{filePath}}"></script>',
-                        css: '<link rel="stylesheet" href="'+prefix+'{{filePath}}" />'
-                    }
-                }
-            }
-        }))
-        .pipe(gulp.dest(COMPILE_PATH))
-
-gulp.task "sass", ->
-    return gulp.src(dedupeGlobs(paths.sass))
- #       .pipe(changed(COMPILE_PATH))
-        .pipe(pipes.sass())
-        .on('error', (e) ->
-            console.error("Error in file "+e.fileName+" line "+e.lineNumber+":\n"+e.message)
-        )
 
 gulp.task "templates", ->
     return gulp.src(dedupeGlobs(paths.templates))
@@ -627,23 +507,6 @@ gulp.task "templates", ->
 
 handler = (err) ->
     console.error(err.message+"  "+err.filename+" line:"+err.location?.first_line)
-
-gulp.task "coffee", ->
-    pipe = gulp.src(dedupeGlobs(paths.coffee))
-        .pipe(sourcemaps.init())
-        .pipe(ngClassify(ngClassifyOptions)).on('error', handler)
-        .pipe(coffee()).on('error', handler)
-        .pipe(ngAnnotate())
-    if UGLIFY_DEV
-        pipe = pipe.pipe(uglify())
-    pipe = pipe
-        .pipe(sourcemaps.write())
-        .pipe(gulp.dest(COMPILE_PATH))
-
-
-gulp.task "coffee_lint", ->
-    return gulp.src(dedupeGlobs(paths.coffee))
-        .pipe(pipes.coffeeLint())
 
 
 copyDeps = (src, cb=->) ->
@@ -683,23 +546,13 @@ gulp.task "copy_extras:dist", ->
     copyExtras('fonts', 'runtimes', DIST_PATH)
 
 gulp.task "images", ->
-    if buildEnv == 'prod'
-        # This task takes FOREVAR on CI
-        return gulp.src(dedupeGlobs(paths.images))
-            .pipe(cache(imageop({
-                optimizationLevel: 5
-                progressive: true
-                interlaced: true
-            })))
-            .pipe(gulp.dest(DIST_PATH))
-    else
-        return gulp.src(dedupeGlobs(paths.images)).pipe(gulp.dest(DIST_PATH))
-
-#gulp.task "add_banner", ->
-#    banner = """// <%= file.path %>"""
-#    gulp.src(DIST_PATH+"/**/*.js")
-#    .pipe(header(banner, file: {path: 'foo'}))
-#    .pipe(gulp.dest(DIST_PATH))
+    return gulp.src(dedupeGlobs(paths.images))
+        .pipe(imageop({
+            optimizationLevel: 5
+            progressive: true
+            interlaced: true
+        }))
+        .pipe(gulp.dest(DIST_PATH))
 
 gulp.task "package-no-min:dist", ->
     assets = useref.assets()
@@ -739,64 +592,6 @@ gulp.task "package:dist", ["package-no-min:dist"], ->
         # Cheap trick to fix source map URL
         .pipe(gulpIf('*.js', replace('//# sourceMappingURL=..', '//# sourceMappingURL=')))
         .pipe(gulp.dest(DIST_PATH))
-
-gulp.task "docs", ['clean:docs'], ->
-    return gulp.src(dedupeGlobs(paths.coffee))
-        .pipe(yuidoc({
-            project:
-                name: config.app_name + " Documentation"
-                description: "A quick demo"
-                version: "0.0.1"
-            syntaxtype: 'coffee'
-        }))
-        .pipe(gulp.dest(DOCS_PATH))
-
-gulp.task "karma", ->
-    bower_files = require("wiredep")(directory: BOWER_PATH).js
-    sources = [].concat bower_files, '.tmp/**/*.!(spec).js', '.tmp/+(modules|components)/**/tests/*.spec.js'
-    karma.start({
-        files: sources
-        frameworks: ['mocha']
-        autoWatch: false
-        background: true
-        #logLevel: config.LOG_WARN
-        browsers: [
-            'PhantomJS'
-        ]
-        transports: [
-            'flashsocket'
-            'xhr-polling'
-            'jsonp-polling'
-        ]
-        singleRun: true
-    });
-
-
-gulp.task('e2e', (cb) ->
-    return gulp.src('./app/e2e/**/*.spec.coffee')
-        .pipe(protractor({
-            configFile: "./protractor.config.coffee"
-        }))
-        .on('error', (e) -> throw e )
-)
-
-# generate sprite file
-# See: https://github.com/aslansky/css-sprite
-# Compiles images in all modules into base64 encoded sass mixins
-# Must @import "sprite" in file then @include sprite($sprite_name)
-# See .tmp/sprite.scss after compilation step to see variable names.
-# Variable name = $[module_name]-images-[filename_underscore_separated]
-gulp.task('sprite', ->
-    return gulp.src(dedupeGlobs(paths.images))
-    .pipe(sprite({
-        name: "sprite"
-        style: "sprite.scss"
-        cssPath: ""
-        base64: true
-        processor: "scss"
-    }))
-    .pipe(gulp.dest(TEMP_PATH))
-)
 
 makeConfig = (isDebug, cb) ->
     configs = glob.sync(BOWER_PATH+"/**/bower.json")
@@ -1052,45 +847,20 @@ gulp.task "default", (cb) ->
                 'templates' # TODO: remove once working with browserify
                 'inject:build_meta'
                 'copy_extras'
-                ['sass', 'bundle:dev']
+                'bundle:dev'
                 'webserver'
-                cb)
-
-gulp.task "default_old", (cb) ->
-    runSequence(['clean:compiled', 'clean:tmp']
-                'copy_deps'
-                'templates'
-                'make_config'
-    #            'sprite'
-                ['coffee', 'sass']
-                'inject',
-                'inject:build_meta'
-                'bower'
-                'copy_extras'
-                'webserver'
-                'watch'
-                cb)
-
-gulp.task "test", (cb) ->
-    runSequence(['clean:compiled', 'clean:tmp']
-                ['coffee', 'sass']
-                'inject'
-                'karma'
                 cb)
 
 gulp.task "build", (cb) ->
-    runSequence(['clean:dist', 'clean:compiled', 'clean:tmp']
-                'copy_deps'
-                'templates'
-                'make_config:dist'
-    #            'sprite'
-                ['coffee', 'sass']
-                'images'
-                'inject',
-                'inject:build_meta'
-                'bower'
-                'copy_extras:dist'
-                'package:dist')
-
-if fs.existsSync('./custom_gulp_tasks.coffee')
-    require('./custom_gulp_tasks.coffee')(gulp)
+    throw new Error('not implemented')
+#    runSequence(['clean:dist', 'clean:compiled', 'clean:tmp']
+#                'copy_deps'
+#                'templates'
+#                'make_config:dist'
+#                ['coffee', 'sass']
+#                'images'
+#                'inject',
+#                'inject:build_meta'
+#                'bower'
+#                'copy_extras:dist'
+#                'package:dist')
