@@ -8,7 +8,7 @@ gulp = require("gulp")
 colors = require("colors")
 glob = require("glob")
 sass = require("gulp-sass")
-replace = require("gulp-replace")
+replace = require("hn-gulp-replace")
 sourcemaps = require("gulp-sourcemaps")
 concat = require("gulp-concat")
 watch = require('gulp-watch')
@@ -425,12 +425,21 @@ gulp.task "sass", ->
         )
 
 gulp.task "templates", ->
-    banner = """<![CDATA[ ${ file.path } ]]>""" #cdata gets around 'directives can only have one root'
+    if buildEnv in ['dev', 'staging']
+        fFileName = replace(/>/, (match, offset, content, file) ->
+            filename = file.path.replace(file.base, '')
+            "><!-- HN-FILE :: #{filename} -->"
+        )
+    else
+        fFileName = gutil.noop()
+
     return gulp.src(dedupeGlobs(paths.templates))
-        .pipe(header(banner))
-        .pipe(templateCache("templates.js"
+        .pipe(fFileName)
+        .pipe(templateCache("templates.js",
             module: config.app_name
             root: '/'
+            htmlmin:
+                removeComments: true
         ))
         .pipe(gulp.dest(COMPILE_PATH))
 
