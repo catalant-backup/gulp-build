@@ -427,15 +427,24 @@ gulp.task "sass", ->
 gulp.task "templates", ->
     banner = """<![CDATA[ ${ file.path } ]]>"""
     if buildEnv in ['dev', 'staging']
+        # fFileName = replace(/>/, (match, offset, content, file) ->
+        #     filename = file.path.replace(file.base, '')
+        #     "><!-- HN-FILE :: #{filename} -->"
+        # )
+        fFileName = gutil.noop()
         fHeader = header(banner)
     else
+        fFileName = gutil.noop()
         fHeader = gutil.noop()
 
     return gulp.src(dedupeGlobs(paths.templates))
+        .pipe(fFileName)
         .pipe(fHeader)
         .pipe(templateCache("templates.js",
             module: config.app_name
             root: '/'
+            htmlmin:
+                removeComments: true
         ))
         .pipe(gulp.dest(COMPILE_PATH))
 
@@ -514,7 +523,7 @@ gulp.task "images", ->
 
 gulp.task "package-no-min:dist", ->
     assets = useref.assets()
-    
+
     return gulp.src(COMPILE_PATH + "/index.html")
         .pipe(rename({ extname: ".nomin.html" }))
         .pipe(assets)
