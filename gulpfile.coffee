@@ -96,6 +96,11 @@ config.dev_server.backend = local_config().backend or "local"
 if '--staging' in process.argv
     config.dev_server.backend = 'staging'
 
+if '--local' in process.argv
+    config.dev_server.backend = 'local'
+
+
+
 console.log("Using Backend: "+config.dev_server.backend.toUpperCase().red.underline)
 
 # Deprecated, use --buildenv argument instead, left here for legacy
@@ -443,8 +448,6 @@ gulp.task "templates", ->
         .pipe(templateCache("templates.js",
             module: config.app_name
             root: '/'
-            htmlmin:
-                removeComments: true
         ))
         .pipe(gulp.dest(COMPILE_PATH))
 
