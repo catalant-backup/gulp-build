@@ -32,7 +32,7 @@ ngAnnotate = require('gulp-ng-annotate')
 imageop = require('gulp-image-optimization')
 karma = require('karma').server
 protractor = require("gulp-protractor").protractor
-sprite = require('css-sprite').stream
+
 rev = require('gulp-rev')
 revReplace = require('gulp-rev-replace')
 _ = require("underscore")
@@ -586,24 +586,6 @@ gulp.task('e2e', (cb) ->
         .on('error', (e) -> throw e )
 )
 
-# generate sprite file
-# See: https://github.com/aslansky/css-sprite
-# Compiles images in all modules into base64 encoded sass mixins
-# Must @import "sprite" in file then @include sprite($sprite_name)
-# See .tmp/sprite.scss after compilation step to see variable names.
-# Variable name = $[module_name]-images-[filename_underscore_separated]
-gulp.task('sprite', ->
-    return gulp.src(dedupeGlobs(paths.images))
-    .pipe(sprite({
-        name: "sprite"
-        style: "sprite.scss"
-        cssPath: ""
-        base64: true
-        processor: "scss"
-    }))
-    .pipe(gulp.dest(TEMP_PATH))
-)
-
 makeConfig = (isDebug, cb) ->
     configs = glob.sync(BOWER_PATH+"/**/bower.json")
     versions = {}
@@ -857,7 +839,6 @@ gulp.task "default", (cb) ->
                 'copy_deps'
                 'templates'
                 'make_config'
-    #            'sprite'
                 ['coffee', 'sass']
                 'inject',
                 'inject:build_meta'
@@ -879,7 +860,6 @@ gulp.task "build", (cb) ->
                 'copy_deps'
                 'templates'
                 'make_config:dist'
-    #            'sprite'
                 ['coffee', 'sass']
                 'images'
                 'inject',
