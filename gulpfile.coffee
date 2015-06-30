@@ -46,6 +46,8 @@ compression = require('compression')
 yargs = require('yargs')
 bless = require('gulp-bless')
 cache = require('gulp-cache')
+ignore = require('gulp-ignore')
+stripDebug = require('gulp-strip-debug')
 
 gulp_src = gulp.src
 
@@ -500,7 +502,7 @@ gulp.task "images", ->
 
 gulp.task "package-no-min:dist", ->
     assets = useref.assets()
-    
+
     return gulp.src(COMPILE_PATH + "/index.html")
         .pipe(rename({ extname: ".nomin.html" }))
         .pipe(assets)
@@ -528,6 +530,7 @@ gulp.task "package:dist", ["package-no-min:dist"], ->
         .pipe(assets.restore())
         .pipe(useref())
         .pipe(gulpIf('*.js', uglify()))
+        .pipe(gulpIf('*.js', stripDebug()))
         .pipe(gulpIf('*.js', rename({ extname: '.min.js' })))
         .pipe(gulpIf('*.css', rename({ extname: '.min.css' })))
         .pipe(revReplace())
