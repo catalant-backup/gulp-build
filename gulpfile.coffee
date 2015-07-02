@@ -47,6 +47,7 @@ yargs = require('yargs')
 bless = require('gulp-bless')
 cache = require('gulp-cache')
 ignore = require('gulp-ignore')
+stripDebug = require('gulp-strip-debug')
 
 gulp_src = gulp.src
 
@@ -532,6 +533,7 @@ gulp.task "package:dist", ->
         .pipe(gulpIf('*.js', sourcemaps.init()))
         .pipe(gulpIf('*.js', ngAnnotate()))
         .pipe(gulpIf('*.js', uglify()))
+        .pipe(gulpIf('*.js', stripDebug()))
         .pipe(gulpIf('*.js', rename({ extname: '.min.js' })))
         .pipe(gulpIf('*.js', sourcemaps.write('.')))
         .pipe(gulpIf('*.css', minifyCss({
