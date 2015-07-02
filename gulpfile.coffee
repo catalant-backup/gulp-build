@@ -48,6 +48,7 @@ bless = require('gulp-bless')
 cache = require('gulp-cache')
 ignore = require('gulp-ignore')
 stripDebug = require('gulp-strip-debug')
+moment = require('moment')
 
 gulp_src = gulp.src
 
@@ -101,6 +102,7 @@ if '--local' in process.argv
     config.dev_server.backend = 'local'
 
 
+lastImageOptimization = moment.unix(local_config().lastImageOptimization or moment().add(-8, 'days').unix())
 
 console.log("Using Backend: "+config.dev_server.backend.toUpperCase().red.underline)
 
@@ -512,18 +514,20 @@ gulp.task "copy_extras:dist", ->
 
 gulp.task "images", ->
     return gulp.src(dedupeGlobs(paths.images))
-        .pipe(imageop({
-            optimizationLevel: 5
-            progressive: true
-            interlaced: true
-        }))
         .pipe(gulp.dest(DIST_PATH))
 
-#gulp.task "add_banner", ->
-#    banner = """// <%= file.path %>"""
-#    gulp.src(DIST_PATH+"/**/*.js")
-#    .pipe(header(banner, file: {path: 'foo'}))
-#    .pipe(gulp.dest(DIST_PATH))
+gulp.task "inplace_images", ->
+    if lastImageOptimization.add(7, 'days').isBefore(moment())
+        local_config(lastImageOptimization: moment().unix())
+        console.log("You haven't optimized images in 7 days, going to do this to you now, sorry :P")
+        console.log("Commit any image changes after this step! They should be ensmallened.")
+        gulp.src('./app/*/**/*.+(png|jpg|gif|jpeg)')
+            .pipe(imageop({
+                optimizationLevel: 5
+                progressive: true
+                interlaced: true
+            }))
+            .pipe(gulp.dest("./app/"))
 
 gulp.task "package:dist", ->
     assets = useref.assets()
@@ -842,6 +846,7 @@ gulp.task "default", (cb) ->
                 'templates'
                 'make_config'
                 ['coffee', 'sass']
+                'inplace_images'
                 'inject',
                 'inject:build_meta'
                 'bower'
