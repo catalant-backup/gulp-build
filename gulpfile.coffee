@@ -49,6 +49,8 @@ cache = require('gulp-cache')
 ignore = require('gulp-ignore')
 stripDebug = require('gulp-strip-debug')
 moment = require('moment')
+rework = require('gulp-rework')
+reworkUrl = require('rework-plugin-url')
 
 gulp_src = gulp.src
 
@@ -185,6 +187,7 @@ paths =
     templates: pathsForExt('html')
     coffee: pathsForExt('coffee')
     images: pathsForExt('+(png|jpg|gif|jpeg)')
+    bower_images: './app/bower_components/**/*.+(png|jpg|gif|jpeg)'
     fonts: BOWER_PATH + '/**/*.+(woff|woff2|svg|ttf|eot|otf)'
     runtimes: BOWER_PATH + '/**/*.+(xap|swf)'
     assets: [
@@ -516,6 +519,17 @@ gulp.task "images", ->
     return gulp.src(dedupeGlobs(paths.images))
         .pipe(gulp.dest(DIST_PATH))
 
+gulp.task "bower_images", ->
+    return gulp.src(paths.bower_images)
+        .pipe(rename( (file) ->
+            if file.extname != ''
+                file.dirname = "bower_images"
+                return file
+            else
+                return no
+        ))
+        .pipe(gulp.dest(DIST_PATH))
+
 gulp.task "inplace_images", ->
     if lastImageOptimization.add(7, 'days').isBefore(moment())
         local_config(lastImageOptimization: moment().unix())
@@ -540,6 +554,13 @@ gulp.task "package:dist", ->
         .pipe(gulpIf('*.js', stripDebug()))
         .pipe(gulpIf('*.js', rename({ extname: '.min.js' })))
         .pipe(gulpIf('*.js', sourcemaps.write('.')))
+        .pipe(gulpIf('*.css', rework(reworkUrl((url) ->
+            if not url.match(/^\/modules/) and url.match(/\.(png|jpeg|jpg|gif)$/i)
+                arr = url.split("/")
+                last = arr[arr.length - 1]
+                return "/bower_images/#{last}"
+            return url
+        ))))
         .pipe(gulpIf('*.css', minifyCss({
             compatibility: 'colors.opacity' # ie doesnt like rgba values :P
         })))
@@ -867,6 +888,7 @@ gulp.task "build", (cb) ->
                 'copy_deps'
                 'templates'
                 'make_config:dist'
+                'bower_images'
                 ['coffee', 'sass']
                 'images'
                 'inject',
