@@ -357,6 +357,7 @@ gulp.task "webserver", ->
     proxy.on('error', (err, req, res, options) ->
         LOG_PROXY_HEADERS and console.log('proxy error:', err)
     )
+
     app.use((req, res, next) ->
         if req.method.toLowerCase() == 'delete' # fix 411 http errors on delete thing
             req.headers['Content-Length'] = '0'
@@ -368,33 +369,40 @@ gulp.task "webserver", ->
     app.use((req, res, next) ->
         _write = res.write
         _end = res.end
-
         url = req.url.toString()
+
+        if not cacheEnabled
+            return next()
         if not url.match(/^\/api\//)
             return next()
 
-        if cacheEnabled
-            if apicache[url]
-                console.log("cache MISS: [#{url}]")
-                res.setHeader("hn-local-api-cache", "HIT")
-                res.send(apicache[url])
-                return #dont call next()
+        cacheKey = url+" [#{req.method}]"
+
+#       using bodyParser with proxy is busted: https://github.com/nodejitsu/node-http-proxy/issues/180
+#       lets revisit this one later :P
+#        if req.method != 'GET'
+#            cacheKey += JSON.stringify(req.body or {})
+
+        if apicache[cacheKey]
+            console.log("cache MISS: [#{url}]")
+            res.setHeader("hn-local-api-cache", "HIT")
+            return res.send(apicache[cacheKey])
         else
             res.setHeader("hn-local-api-cache", "MISS")
 
         buffer = ""
-        req.on("close", ->
+        req.on("close", () ->
             buffer = ""
         )
         res.write = (data) ->
-            if res._headers['content-type'] == 'application/json' and cacheEnabled
+            if res._headers['content-type'] == 'application/json'
                 buffer += data.toString()
             _write.call(res, data)
 
         res.end = () ->
-            if not apicache[url]
+            if not apicache[cacheKey]
                console.log("cache HIT: [#{url}]")
-               apicache[url] = buffer
+               apicache[cacheKey] = buffer
             _end.call(res)
 
         next()
@@ -408,6 +416,12 @@ gulp.task "webserver", ->
             cacheEnabled = false
         if cmd == 'clear'
             apicache = {}
+        if cmd == 'delete'
+            key = req.body.key
+            success = !!apicache[key]
+            delete apicache[key]
+            return res.json({success: success, key: key})
+
         console.log("api cache command: [#{cmd}] - key count:", _.keys(apicache).length)
         return res.json({cacheEnabled: cacheEnabled, index: _.mapObject(apicache, (val, key) -> val.length)})
     )
