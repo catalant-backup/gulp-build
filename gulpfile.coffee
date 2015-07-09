@@ -357,7 +357,6 @@ gulp.task "webserver", ->
     proxy.on('error', (err, req, res, options) ->
         LOG_PROXY_HEADERS and console.log('proxy error:', err)
     )
-
     app.use((req, res, next) ->
         if req.method.toLowerCase() == 'delete' # fix 411 http errors on delete thing
             req.headers['Content-Length'] = '0'
@@ -384,7 +383,7 @@ gulp.task "webserver", ->
 #            cacheKey += JSON.stringify(req.body or {})
 
         if apicache[cacheKey]
-            console.log("cache MISS: [#{url}]")
+            console.log("cache HIT: [#{cacheKey}]")
             res.setHeader("hn-local-api-cache", "HIT")
             return res.send(apicache[cacheKey])
         else
@@ -401,7 +400,7 @@ gulp.task "webserver", ->
 
         res.end = () ->
             if not apicache[cacheKey]
-               console.log("cache HIT: [#{url}]")
+               console.log("cache MISS: [#{cacheKey}]")
                apicache[cacheKey] = buffer
             _end.call(res)
 
