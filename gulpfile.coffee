@@ -362,6 +362,56 @@ gulp.task "webserver", ->
             req.headers['Content-Length'] = '0'
         next()
     )
+
+    cacheEnabled = false #to enable, in app console: apicache.enable() and .disable() .clear() .status()
+    apicache = {}
+    app.use((req, res, next) ->
+        _write = res.write
+        _end = res.end
+
+        url = req.url.toString()
+        if not url.match(/^\/api\//)
+            return next()
+
+        if cacheEnabled
+            if apicache[url]
+                console.log("cache MISS: [#{url}]")
+                res.setHeader("hn-local-api-cache", "HIT")
+                res.send(apicache[url])
+                return #dont call next()
+        else
+            res.setHeader("hn-local-api-cache", "MISS")
+
+        buffer = ""
+        req.on("close", ->
+            buffer = ""
+        )
+        res.write = (data) ->
+            if res._headers['content-type'] == 'application/json' and cacheEnabled
+                buffer += data.toString()
+            _write.call(res, data)
+
+        res.end = () ->
+            if not apicache[url]
+               console.log("cache HIT: [#{url}]")
+               apicache[url] = buffer
+            _end.call(res)
+
+        next()
+    )
+    
+    app.post("/__devapi__/cache/:command?", (req, res) ->
+        cmd = (req.params.command or 'status').toLowerCase()
+        if cmd == 'enable'
+            cacheEnabled = true
+        if cmd == 'disable'
+            cacheEnabled = false
+        if cmd == 'clear'
+            apicache = {}
+        console.log("api cache command: [#{cmd}] - key count:", _.keys(apicache).length)
+        return res.json({cacheEnabled: cacheEnabled, index: _.mapObject(apicache, (val, key) -> val.length)})
+    )
+
     app.all("/api/*", (req, res) ->
         req.url = req.url.replace('/api', '')
         LOG_PROXY_HEADERS and console.log('proxying ', req.url, 'to', backend.host)
@@ -899,3 +949,4 @@ gulp.task "build", (cb) ->
 
 if fs.existsSync('./custom_gulp_tasks.coffee')
     require('./custom_gulp_tasks.coffee')(gulp)
+dd
