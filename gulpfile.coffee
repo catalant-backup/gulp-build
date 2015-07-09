@@ -68,6 +68,7 @@ UGLIFY_DEV = false
 SERVE_MINFIED = false #serve dist, toggle to true, gulp build, then gulp webserver to see prod like stuffs
 buildEnv = 'dev'
 isProdBuild = false # Deprecated with buildEnv, left here temporarily for legacy purposes.
+cacheEnabled = false #to enable, in app console: apicache.enable() and .disable() .clear() .status()
 
 # read or update local config - no args = read, or update with an object
 local_config = (update) ->
@@ -103,10 +104,14 @@ if '--staging' in process.argv
 if '--local' in process.argv
     config.dev_server.backend = 'local'
 
+if '--cache' in process.argv
+    cacheEnabled = true
+
 
 lastImageOptimization = moment.unix(local_config().lastImageOptimization or moment().add(-8, 'days').unix())
 
 console.log("Using Backend: "+config.dev_server.backend.toUpperCase().red.underline)
+console.log("API cache ENABLED".green.underline) if cacheEnabled
 
 # Deprecated, use --buildenv argument instead, left here for legacy
 if '--prod' in process.argv
@@ -363,7 +368,7 @@ gulp.task "webserver", ->
         next()
     )
 
-    cacheEnabled = false #to enable, in app console: apicache.enable() and .disable() .clear() .status()
+
     apicache = {}
     app.use((req, res, next) ->
         _write = res.write
