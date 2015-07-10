@@ -370,6 +370,19 @@ gulp.task "webserver", ->
 
 
     apicache = {}
+
+
+
+    apicacheCfg = local_config().apicache
+    if not apicacheCfg
+        apicacheCfg =
+            allow:
+                GET: true
+                POST: true
+                PATCH: true
+                DELETE: true
+        local_config(apicache: apicacheCfg)
+
     app.use((req, res, next) ->
         _write = res.write
         _end = res.end
@@ -382,10 +395,9 @@ gulp.task "webserver", ->
 
         cacheKey = url+" [#{req.method}]"
 
-#       using bodyParser with proxy is busted: https://github.com/nodejitsu/node-http-proxy/issues/180
-#       lets revisit this one later :P
-#        if req.method != 'GET'
-#            cacheKey += JSON.stringify(req.body or {})
+        if not apicacheCfg.allow[req.method]
+            console.log("cache IGNORE: #{req.method} not allowed - [#{url}]")
+            return next()
 
         if apicache[cacheKey]
             console.log("cache HIT: [#{cacheKey}]")
