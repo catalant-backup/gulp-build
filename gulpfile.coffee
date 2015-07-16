@@ -209,7 +209,7 @@ pipes = {
             .pipe(gulp.dest, COMPILE_PATH)
     sass:
         lazypipe()
-            .pipe(sourcemaps.init)
+            .pipe(sourcemaps.init, {loadMaps: true})
             .pipe(sass, {
                 includePaths: ['.tmp/', 'app/bower_components', 'app']
                 precision: 8
@@ -224,7 +224,7 @@ pipes = {
                         'column'
                         (err.column+'').bold)
             })
-            .pipe(sourcemaps.write)
+            .pipe(sourcemaps.write, {includeContent: false})
             .pipe(gulp.dest, COMPILE_PATH)
 }
 
