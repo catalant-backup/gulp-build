@@ -46,6 +46,11 @@ compression = require('compression')
 yargs = require('yargs')
 bless = require('gulp-bless')
 cache = require('gulp-cache')
+ignore = require('gulp-ignore')
+partialify = require('partialify/custom')
+
+rework = require('rework')
+reworkUrl = require('rework-plugin-url')
 
 transform = require('vinyl-transform')
 browserify = require("browserify")
@@ -64,35 +69,33 @@ parcelify = require('parcelify')
 uglify = require('gulp-uglify')
 cssmin = require('gulp-cssmin')
 aliasify = require('aliasify')
-scssify = require('scssify')
-ngHtml2Js = require('browserify-ng-html2js')
 browserify_ngannotate = require('browserify-ngannotate')
 
 bowerResolve = require('bower-resolve')
 nodeResolve = require('resolve')
-debowerify = require('debowerify')
 remapify = require('remapify')
+sassCssStream = require('sass-css-stream')
+browserifyInc = require('browserify-incremental')
+filesize = (f) ->
+    return " "+require('filesize')(fs.statSync(path.join(__dirname, f)).size)
 
-#SegfaultHandler = require('segfault-handler')
-#SegfaultHandler.registerHandler()
+SegfaultHandler = require('segfault-handler')
+SegfaultHandler.registerHandler()
+# Troubleshooting:
 
+# segfault:
+# if segfault happens and its related to sass, print out 'file' from here: node_modules/scssify/lib/index.js@67
 
-gulp_src = gulp.src
+# too many open files:
+# launchctl limit maxfiles 16384 16384 && ulimit -n 16384
 
-gulp.src = ->
-    gulp_src.apply(gulp, arguments).pipe(plumber((error) ->
-        # Output an error message
-        gutil.log gutil.colors.red('Error (' + error.plugin + '): ' + error.message)
-        # emit the end event, to properly end the task
-        @emit 'end'
-        return
-    ))
 
 LOG_PROXY_HEADERS = false
 UGLIFY_DEV = false
 SERVE_MINFIED = false #serve dist, toggle to true, gulp build, then gulp webserver to see prod like stuffs
 buildEnv = 'dev'
 isProdBuild = false # Deprecated with buildEnv, left here temporarily for legacy purposes.
+cacheEnabled = false #to enable, in app console: apicache.enable() and .disable() .clear() .status()
 
 # read or update local config - no args = read, or update with an object
 local_config = (update) ->
@@ -126,6 +129,7 @@ if '--staging' in process.argv
     config.dev_server.backend = 'staging'
 
 console.log("Using Backend: "+config.dev_server.backend.toUpperCase().red.underline)
+console.log("API cache ENABLED".green.underline) if cacheEnabled
 
 # Deprecated, use --buildenv argument instead, left here for legacy
 if '--prod' in process.argv
@@ -175,12 +179,11 @@ dedupeGlobs = (globs, root="/modules") ->
     _.each(globs, (glb) ->
         if glb.charAt(0) != '!'
             glob.sync(glb).forEach((p) ->
-                if p.indexOf('bower_components') <= -1
-                    d = p.replace(re, "")
-                    if not deduper[d]
-                        deduper[d] = p
-                    else
-                        ignorePaths.push("!"+p)
+                d = p.replace(re, "")
+                if not deduper[d]
+                    deduper[d] = p
+                else
+                    ignorePaths.push("!"+p)
             )
     )
     return globs.concat(ignorePaths)
@@ -197,20 +200,17 @@ ngClassifyOptions =
         suffix: ''
 pathsForExt = (ext) ->
     return [
-        "./app/modules/**/*.#{ext}"
-        "./app/components/**/*.#{ext}"
-        "./app/bower_components/hn-core/app/modules/**/*.#{ext}"
-        "./app/bower_components/hn-core/app/components/**/*.#{ext}"
-        "./app/bower_components/hn-nerds-components/app/modules/**/*.#{ext}"
-        "./app/bower_components/hn-nerds-components/app/components/**/*.#{ext}"
-        "./app/bower_components/hn-projects-components/app/modules/**/*.#{ext}"
-        "./app/bower_components/hn-projects-components/app/components/**/*.#{ext}"
+        "./app/**/*.#{ext}"
+        "./app/bower_components/hn-core/app/**/*.#{ext}"
+        "./app/bower_components/hn-nerds-components/app/**/*.#{ext}"
+        "./app/bower_components/hn-projects-components/app/**/*.#{ext}"
     ]
 paths =
     sass: pathsForExt('scss')
     templates: pathsForExt('html')
     #coffee: pathsForExt('coffee')
     images: pathsForExt('+(png|jpg|gif|jpeg)')
+    bower_images: './app/bower_components/**/*.+(png|jpg|gif|jpeg)'
     fonts: BOWER_PATH + '/**/*.+(woff|woff2|svg|ttf|eot|otf)'
     runtimes: BOWER_PATH + '/**/*.+(xap|swf)'
     assets: [
@@ -233,10 +233,13 @@ gulp.task "clean:dist",  ->
     return gulp.src(DIST_PATH)
         .pipe(vinylPaths(del))
 
-injectBundle = ->
+
+injectBundle = (task_cb=->) ->
     target = gulp.src("./app/index.html")
     sources = gulp.src([
-        "./.compiled/**/*.css"
+        "./.compiled/bundle/vendor.css"
+        "./.compiled/bundle/app.css"
+        "./.compiled/bundle/*.map"
         "./.compiled/bundle/common.js"
         "./.compiled/bundle/app.js"
     ], read: false)
@@ -248,7 +251,20 @@ injectBundle = ->
                 filepath = filepath.replace('/.compiled', '') #TODO
                 return inject.transform.apply(inject.transform, [filepath])
         ))
+        .pipe(inject(gulp.src('./bower.json'),
+            starttag: '<!-- browserify_temp_hack -->',
+            endtag: '<!-- end_browserify_temp_hack -->'
+            transform: (filepath, file) ->
+                return """
+                <script src="/bower_components/jquery/dist/jquery.js"></script>
+                <script src="/bower_components/jstzdetect/jstz.js"></script>
+                <script src="/bower_components/js-base64/base64.js"></script>
+                <script src="/bower_components/sanitize.js/lib/sanitize.js"></script>"""
+        ))
         .pipe(gulp.dest(COMPILE_PATH))
+        .on("end", ->
+            task_cb()
+        )
 
 gulp.task('inject:build_meta', ->
     return gulp.src(COMPILE_PATH + "/index.html")
@@ -263,12 +279,19 @@ gulp.task('inject:build_meta', ->
         .pipe(gulp.dest(COMPILE_PATH))
 )
 
-gulp.task "webserver", ->
+gulp.task "webserver", (cb) ->
+    cb() #no need to wait for this to be done, this cb creates an illusion of speeeeeeeeed
+
     fallback = (req, res, next) ->
         if SERVE_MINFIED
-            res.sendFile(path.join(__dirname, DIST_PATH, "index.html"))
+            f = path.join(__dirname, DIST_PATH, "index.html")
         else
-            res.sendFile(path.join(__dirname, COMPILE_PATH, "index.html"))
+            f = path.join(__dirname, COMPILE_PATH, "index.html")
+
+        if fs.existsSync(f)
+            res.sendFile(f)
+        else
+            res.send("<html><meta http-equiv='refresh' content='1'><br><br><br><center><h1>Still Gulping...")
 
     backend = config.backends[config.dev_server.backend]
     app = express()
@@ -295,6 +318,81 @@ gulp.task "webserver", ->
             req.headers['Content-Length'] = '0'
         next()
     )
+
+
+    apicache = {}
+
+
+
+    apicacheCfg = local_config().apicache
+    if not apicacheCfg
+        apicacheCfg =
+            allow:
+                GET: true
+                POST: true
+                PATCH: true
+                DELETE: true
+        local_config(apicache: apicacheCfg)
+
+    app.use((req, res, next) ->
+        _write = res.write
+        _end = res.end
+        url = req.url.toString()
+
+        if not cacheEnabled
+            return next()
+        if not url.match(/^\/api\//)
+            return next()
+
+        cacheKey = url+" [#{req.method}]"
+
+        if not apicacheCfg.allow[req.method]
+            console.log("cache IGNORE: #{req.method} not allowed - [#{url}]")
+            return next()
+
+        if apicache[cacheKey]
+            console.log("cache HIT: [#{cacheKey}]")
+            res.setHeader("hn-local-api-cache", "HIT")
+            return res.send(apicache[cacheKey])
+        else
+            res.setHeader("hn-local-api-cache", "MISS")
+
+        buffer = ""
+        req.on("close", () ->
+            buffer = ""
+        )
+        res.write = (data) ->
+            if res._headers['content-type'] == 'application/json'
+                buffer += data.toString()
+            _write.call(res, data)
+
+        res.end = () ->
+            if not apicache[cacheKey]
+               console.log("cache MISS: [#{cacheKey}]")
+               apicache[cacheKey] = buffer
+            _end.call(res)
+
+        next()
+    )
+    
+    app.post("/__devapi__/cache/:command?", (req, res) ->
+        cmd = (req.params.command or 'status').toLowerCase()
+        if cmd == 'enable'
+            cacheEnabled = true
+        if cmd == 'disable'
+            cacheEnabled = false
+        if cmd == 'clear'
+            apicache = {}
+        if cmd == 'delete'
+            key = req.body.key
+            success = !!apicache[key]
+            delete apicache[key]
+            return res.json({success: success, key: key})
+
+        console.log("api cache command: [#{cmd}] - key count:", _.keys(apicache).length)
+        return res.json({cacheEnabled: cacheEnabled, index: _.mapObject(apicache, (val, key) -> val.length)})
+    )
+
     app.all("/api/*", (req, res) ->
         req.url = req.url.replace('/api', '')
         LOG_PROXY_HEADERS and console.log('proxying ', req.url, 'to', backend.host)
@@ -329,36 +427,32 @@ getChildOverrides = (bowerPath) ->
     _.extend(overrides, require(path.join(__dirname, "bower.json")).overrides or {})
     return overrides
 
-getBowerPackageIds = ->
-  bowerManifest = {}
-  try
-    bowerManifest = require('./bower.json')
-  catch e
-    # does not have a bower.json manifest
-  return _.keys(bowerManifest.dependencies) or []
+getBowerPackageNames = (filterFn) ->
+    coreDeps = _.keys(require(path.join(__dirname, './app/bower_components/hn-core/bower.json')).dependencies)
+    return _.filter(_.unique(_.keys(require('./bower.json').dependencies).concat(coreDeps)), filterFn)
 
-getNPMPackageIds = ->
-  packageManifest = {}
-  try
-    packageManifest = require('./package.json')
-  catch e
-    # does not have a package.json manifest
-  return _.keys(packageManifest.dependencies) or []
+getNPMPackageNames = ->
+    packageManifest = {}
+    try
+        packageManifest = require('./package.json')
+    catch e
+        # does not have a package.json manifest
+    return _.keys(packageManifest.dependencies) or []
 
 
-gulp.task 'bundle:dev', () ->
+gulp.task 'bundle', (task_cb) ->
 
-    ###
-    to use:
-    npm install bootstrap-sass --save
-###
-    overrides = glob.sync('./app/overrides/**/*')
+    if isProdBuild
+        watchify = browserifyInc = (b) ->
+            return b
+
+    FULL_PATHS = true # required for incremental builds to work. prod doesnt use these so its ok
+
     aliases =
         'underscore': 'lodash'
-        'modules/common/styles/_hnvars.scss': './app/bower_components/hn-core/app/modules/common/styles/_hnvars.scss'
 
 
-    _.each(overrides, (fn) ->
+    _.each(glob.sync('./app/overrides/**/*'), (fn) ->
         aliases["./"+path.relative('./app/overrides/', fn)] = fn
     )
 
@@ -366,50 +460,112 @@ gulp.task 'bundle:dev', () ->
 
     externals = []
     buildCommonBundle = ->
-        b = browserify(
-            fullPaths: true
-        )
+        opts =
+            fullPaths: FULL_PATHS
+            noParse: []
+            cache: {}
+            packageCache: {}
 
         expose = (arr) ->
-            _.each(arr, (name) ->
+            return _.map(arr, (name) ->
                 resolved = bowerResolve.fastReadSync(name)
-                relative = "./"+path.relative(path.join(__dirname, 'app'), resolved)
-                b.require(resolved, expose: relative)
-                externals.push(relative)
+                relative = "./"+path.relative(__dirname, resolved)
+
+                if fs.existsSync(resolved)
+#                    console.log('"'+name+"\":\""+relative+"\",")
+                    externals.push(relative)
+                    opts.noParse.push(resolved)
+                    return (b) ->
+                        b.require(resolved, expose: name)
+                else
+                    return ->
             )
 
-        expose(['angular-messages', 'angular-resource', 'angular-touch'])
-        expose(['angular-loading-bar', 'angular-sanitize', 'angular-bootstrap'])
-        expose(['angulartics', 'ui-router', 'angular-ui-select', 'angular-ui-utils'])
+        registerFunctions = expose(getBowerPackageNames((name) ->
+            if name.indexOf("hn-") > -1
+                f = path.join(__dirname, './app/bower_components/', name)
+                # put our stuff in the common bundle when it IS NOT a symlink
+                # otherwise, put into app bundle which has a watch on it.
+                return fs.realpathSync(f) == f
+            if name == 'chai'
+                return false # this thing sucks
+            return true
+        ))
+        b = browserify(opts) #need to call this AFTER expose is called  so that it mutates opts!!
+        b = browserifyInc(b, cacheFile: './.compiled/browserify_common_cache.json')
+        _.each(glob.sync("./app/bower_components/**/*.+(html|scss)"), (fn) ->
+            fn = path.join(__dirname, fn)
+            opts.noParse.push(fn)
+        )
+        _.each(registerFunctions, (fn) -> fn(b))
+
         b.require(path.join(__dirname, '.compiled', 'config.js'), expose: 'hn-config')
         b.require(path.join(__dirname, '.compiled', 'templates.js'), expose: 'hn-templates')
-        externals = externals.concat(['hn-config', 'hn-templates'])
+        b.require('jquery')
+        b.require('moment')
+        b.require('angular')
+        b.require('lodash')
+
+        externals = externals.concat(['hn-config', 'hn-templates', 'moment', 'angular', 'lodash', 'jquery'])
         b.bundle()
             .pipe(source('./app/common.js'))
             .on('error', gutil.log.bind(gutil, 'Browserify Error'))
             .pipe(buffer())
             .pipe($.flatten())
             .pipe(gulp.dest('.compiled/bundle/', {base: '.compiled'}))
+            .on('end', ->
+                console.log("common bundle finished:".green.underline + filesize('./.compiled/bundle/common.js'))
+            )
 
     buildCommonBundle()
 
-    bundler = watchify(browserify(
+    bundler = watchify(
+        browserify(
             entries: ['./app/app.coffee']
             extensions: ['.coffee']
             paths: ['./app/', './app/bower_components']
             debug: not isProdBuild
             cache: {}
             packageCache: {}
-            fullPaths: true
+            fullPaths: FULL_PATHS
+            bundleExternal: true
+        )
+        .transform(partialify.onlyAllow('html'))
+        .transform((file) ->
+            return through() if not (/\.(scss|css)$/i).test(file)
+            # ignore some files for now
+            # console.log("remove scss, and css for some reason", file)
+            return through((->), ->
+                this.queue('')
+                this.queue(null)
+            )
         )
         .transform((file) ->
             return through() if not (/\.coffee$/i).test(file)
-            data = '';
+            buffer = ""
+            #TODO: make into a plugin!
             return through((buf) ->
-                data += buf
+                buffer += buf
             , ->
-                this.queue(ngClassify(data, ngClassifyOptions))
-                this.queue(null)
+                try
+                    data = ngClassify(buffer, ngClassifyOptions)
+                    this.queue(data)
+                    this.queue(null)
+                catch err
+                    error = new gutil.PluginError('coffeescript', err)
+                    loc = error.location
+                    issue = error.code.split("\n")[loc.first_line]
+                    before = issue[loc.first_line - 1] or ""
+                    after = issue[loc.first_line + 1] or ""
+                    before = before + "\n" if before
+                    after = "\n" + after if after
+                    first = issue.substring(0, loc.first_column)
+                    middle = issue.substring(loc.first_column, loc.last_column)
+                    last = issue.substring( loc.last_column)
+                    console.log("coffeescript! #{error.name}:".red.bold.underline
+                        "'#{error.message}' in #{file}"+"@".bold+"#{loc.first_line}:#{loc.first_column}\n"
+                        before+first+middle.red.underline+last+after
+                    )
             )
         )
         .transform(coffeeify)
@@ -417,61 +573,90 @@ gulp.task 'bundle:dev', () ->
             aliases: aliases
             verbose: not isProdBuild
         )
-  #      .transform('deamdify')
-
-
         .transform((file) ->
             return through() if not (/\.coffee|app\/modules|app\/components/i).test(file)
             return browserify_ngannotate(file, {ext: ['.coffee']})
         )
-        .transform((file) ->
-            return debowerify(file)
-        )
-#        .plugin('parcelify', {
-#            bundles: {
-#                style: './.compiled/bundle/app.css'
-#            },
-#            appTransformDirs: ['./app/', './app/bower_components/', './app/bower_components/hn-core/app/']
-#            watch: true
-#        })
-#        .plugin(remapify, [
-#            {
-#                src: './app/(modules|components)/**/*.*' # glob for the files to remap
-#                expose: 'components' # this will expose `__dirname + /client/views/home.js` as `views/home.js`
-#                cwd: './app/bower_components/hn-projects-components/' # defaults to process.cwd()
-#                filter: (alias, dirname, basename) -> # // customize file names
-#                    console.log("gulpfile@501:", arguments)
-#                    return path.join(dirname, basename.replace('foo', 'bar'))
-#            }
-#        ])
-        .transform(scssify,
-            autoInject: # autoInject may be set to true to use defaults
-                verbose: true # verbose adds data-href path to the file when styleTag is used
-                styleTag: false # When styleTag is false, a <link> tag is used
+    )
+    if isProdBuild
+        bundler.plugin(require('bundle-collapser/plugin'))
 
-            # To turn off autoInject, set autoInject to false
-            # 'autoInject': false,
-            sass:  #Full sass options
-                sourceComments: false
-                sourceMap: true
-                sourceMapEmbed: true
-                sourceMapContents: true
-                outputStyle: if isProdBuild then 'compressed' else 'nested'
-                includePaths: ['./app/', './app/bower_components/', './app/bower_components/hn-core/app/']
-                precision: 8
-            postcss: false
-            rootDir: process.cwd()
-        )
-        .transform((file) ->
-            return through() if not (/\.(html)$/i).test(file)
-            #ignore html files for now
-            console.log("remove htmlness", file)
-            return through((->), ->
-                this.queue('')
-                this.queue(null)
-            )
+    vendorCss = {}
+    p = parcelify(bundler, {
+        watch: true
+    #    logLevel: "verbose"
+        bundles: {
+            style: './.compiled/bundle/app.css'
+        }
+        # if passing options is not necessary this transform should be defined in the
+        #  package.json like so `"transforms": ["sass-css-stream"]`
+        appTransforms: [
+            # need an wrapper function to pass options to the stream transformer
+            (file) ->
+                fileName = path.basename(file)
+                if fileName.match(/^(_|\.)/)
+                    return through((() ->), () ->
+                        this.queue('.node-sass-bug-fixer { content:"its a bug";}')
+                        this.queue(null)
+                    )
+                return sassCssStream( file,
+                    includePaths: [
+                        './app/',
+                        './app/bower_components/hn-core/app/',
+                        './app/bower_components/'
+                    ]
+                    precision: 8
+                    sourceMap: not isProdBuild #"./compiled/bundle/styles.css.map"
+                    sourceMapContents: false
+                    sourceMapEmbed: true
+                    sourceMapRoot: "."
+                    importer: (url, fromFile) ->
+                        if url.match(/\.css$/i)
+                            file = path.join(__dirname, "./app/bower_components", url)
+                            if fs.existsSync(file)
+                                contents = fs.readFileSync(file, 'utf8').toString()
+                                contents = rework(contents, source: url).use(reworkUrl((url) ->
+                                    if not url.match(/^\/modules/) and url.match(/\.(png|jpeg|jpg|gif)$/i)
+                                        return "/bower_images/#{_.last(url.split("/"))}"
+                                    return url
+                                )).toString(sourcemap: true)
+                                r =
+                                    contents: "/* note: [#{url}] was moved into vendor.css by build */"
+                                    file: file
+                                vendorCss[url] = contents
+                                return r
+                            else
+                                console.log("SASS CSS Import Error:".red.underline
+                                    " cannot @import url: "
+                                    "[#{url}] from: [#{fromFile}] file not found: #{file}")
+                        return
+
+
+                    onError: (err) ->
+                        file_path = err.file?.replace(__dirname, "")
+                        console.log("SASS Error:".red.underline
+                            err.message.bold
+                            'in file'
+                            file_path?.bold
+                            'on line'
+                            (err.line+'').bold
+                            'column'
+                            (err.column+'').bold)
+                )
+        ],
+        appTransformDirs: [
+            './app/', './app/bower_components/',
+            fs.realpathSync(path.join(__dirname, './app/bower_components/hn-core/app/'))
+        ]
+    })
+    p.on('done', ->
+        fs.writeFileSync("./.compiled/bundle/vendor.css", _.values(vendorCss).join("\n\n"))
+        injectBundle(->
+            console.log("css bundle finished:".green.underline + filesize('./.compiled/bundle/vendor.css'))
+            task_cb()
         )
     )
+
 
     _.each(externals, (name) ->
         bundler.external(name)
@@ -482,12 +667,15 @@ gulp.task 'bundle:dev', () ->
             .pipe(source('./app/app.js'))
             .on('error', gutil.log.bind(gutil, 'Browserify Error'))
             .pipe(buffer())
-            .pipe(sourcemaps.init(loadMaps: true))
-            .pipe(sourcemaps.write())
+#            .pipe(sourcemaps.init(loadMaps: true))
+#            .pipe(sourcemaps.write())
             .pipe($.flatten())
             .pipe(gulp.dest('.compiled/bundle', {base: '.compiled'}))
             .on('end', ->
-                injectBundle() if firstRun
+                if firstRun
+                    injectBundle( ()->
+                        console.log("app bundle finished:".green.underline + filesize('./.compiled/bundle/app.js'))
+                    )
             )
 
     rebundle()
@@ -495,15 +683,42 @@ gulp.task 'bundle:dev', () ->
     return
 
 
-gulp.task "templates", ->
+gulp.task("templates", ->
+    if isProdBuild
+        return fs.writeFileSync(path.join(COMPILE_PATH, "templates.js", ""))
+
     return gulp.src(dedupeGlobs(paths.templates))
+        # only templetize our own stuff, ignore rest of bower
+        .pipe(ignore(/bower_components\/(?!hn-)/))
+        .pipe(ignore(/index.html/))
+        .pipe(ignore(/hn-angular/)) #hn-angular-squire and hn-angular-ellipsis
         .pipe(templateCache("templates.js",
             module: 'hn.core'
-            root: '/modules/'
-            htmlmin:
-                removeComments: true
+            root: '/'
+#            transformUrl: (file) ->
+#                return file.replace(/\/bower_components\/hn-[\w-]+\/app/, '')
         ))
         .pipe(gulp.dest(COMPILE_PATH))
+)
+
+bower_images = () ->
+    return gulp.src(paths.bower_images)
+    .pipe(rename( (file) ->
+        if file.extname != ''
+            file.dirname = "bower_images"
+            return file
+        else
+            return no
+    ))
+
+gulp.task "bower_images:dev", ->
+    bower_images()
+    .pipe(gulp.dest(COMPILE_PATH))
+
+gulp.task "bower_images:dist", ->
+    bower_images()
+    .pipe(gulp.dest(DIST_PATH))
+
 
 handler = (err) ->
     console.error(err.message+"  "+err.filename+" line:"+err.location?.first_line)
@@ -562,6 +777,7 @@ gulp.task "package-no-min:dist", ->
         .pipe(assets)
         .pipe(gulpIf('*.js', ngAnnotate()))
         .pipe(gulpIf('*.css', minifyCss({
+            cache: true
             compatibility: 'colors.opacity' # ie doesnt like rgba values :P
         })))
         .pipe(rev())
@@ -571,13 +787,14 @@ gulp.task "package-no-min:dist", ->
         .pipe(gulpIf('*.css', bless())) # fix ie9 4096 max selector per file evil
         .pipe(gulp.dest(DIST_PATH))
 
-gulp.task "package:dist", ["package-no-min:dist"], ->
+gulp.task "package:dist", ["package-no-min:dist"], (cb) ->
     assets = useref.assets()
     return gulp.src(COMPILE_PATH + "/index.html")
         .pipe(assets)
         .pipe(gulpIf('*.js', sourcemaps.init()))
         .pipe(gulpIf('*.js', ngAnnotate()))
         .pipe(gulpIf('*.css', minifyCss({
+            cache: true
             compatibility: 'colors.opacity' # ie doesnt like rgba values :P
         })))
         .pipe(rev())
@@ -592,6 +809,12 @@ gulp.task "package:dist", ["package-no-min:dist"], ->
         # Cheap trick to fix source map URL
         .pipe(gulpIf('*.js', replace('//# sourceMappingURL=..', '//# sourceMappingURL=')))
         .pipe(gulp.dest(DIST_PATH))
+
+        .on('end', _.once(->
+            console.log("gulpfile@797:", "done1")
+
+            cb()
+        ))
 
 makeConfig = (isDebug, cb) ->
     configs = glob.sync(BOWER_PATH+"/**/bower.json")
@@ -842,25 +1065,24 @@ gulp.task('bower_install', bower_install)
 gulp.task('b', bower_install)
 
 gulp.task "default", (cb) ->
-    runSequence('clean:compiled'
-                'make_config'
-                'templates' # TODO: remove once working with browserify
-                'inject:build_meta'
-                'copy_extras'
-                'bundle:dev'
-                'webserver'
-                cb)
+    runSequence(
+        #'clean:compiled'
+        'bower_images:dev'
+        'make_config'
+        'templates' # TODO: remove once working with browserify
+        'copy_extras'
+        'webserver'
+        'bundle'
+        cb)
 
 gulp.task "build", (cb) ->
-    throw new Error('not implemented')
-#    runSequence(['clean:dist', 'clean:compiled', 'clean:tmp']
-#                'copy_deps'
-#                'templates'
-#                'make_config:dist'
-#                ['coffee', 'sass']
-#                'images'
-#                'inject',
-#                'inject:build_meta'
-#                'bower'
-#                'copy_extras:dist'
-#                'package:dist')
+    runSequence(
+        'clean:compiled'
+        'clean:dist'
+        'bower_images:dist'
+        'make_config'
+        'templates' # TODO: remove once working with browserify
+        'copy_extras'
+        'bundle'
+        'package:dist'
+        cb)
