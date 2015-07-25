@@ -11,7 +11,6 @@ sass = require("gulp-sass")
 replace = require("gulp-replace")
 sourcemaps = require("gulp-sourcemaps")
 concat = require("gulp-concat")
-watch = require('gulp-watch')
 coffee = require("gulp-coffee")
 changed = require("gulp-changed")
 wiredep = require("wiredep").stream
@@ -20,19 +19,16 @@ inject = require("gulp-inject")
 coffeelint = require('gulp-coffeelint')
 del = require('del')
 vinylPaths = require('vinyl-paths')
-ngClassify = require('gulp-ng-classify')
 runSequence = require('run-sequence')
 minifyCss = require('gulp-minify-css')
 uglify = require('gulp-uglify')
 useref = require('gulp-useref')
 rename = require('gulp-rename')
 gulpIf = require('gulp-if')
-yuidoc = require("gulp-yuidoc")
 ngAnnotate = require('gulp-ng-annotate')
 imageop = require('gulp-image-optimization')
-karma = require('karma').server
-protractor = require("gulp-protractor").protractor
-sprite = require('css-sprite').stream
+#karma = require('karma').server
+#protractor = require("gulp-protractor").protractor
 rev = require('gulp-rev')
 revReplace = require('gulp-rev-replace')
 _ = require("underscore")
@@ -41,7 +37,6 @@ plumber = require('gulp-plumber')
 gutil = require('gulp-util')
 lazypipe = require('lazypipe')
 express = require('express')
-sassGraph = require('gulp-sass-graph')
 compression = require('compression')
 yargs = require('yargs')
 bless = require('gulp-bless')
@@ -72,7 +67,7 @@ aliasify = require('aliasify')
 browserify_ngannotate = require('browserify-ngannotate')
 
 bowerResolve = require('bower-resolve')
-nodeResolve = require('resolve')
+
 remapify = require('remapify')
 sassCssStream = require('sass-css-stream')
 browserifyInc = require('browserify-incremental')
@@ -374,7 +369,7 @@ gulp.task "webserver", (cb) ->
 
         next()
     )
-    
+
     app.post("/__devapi__/cache/:command?", (req, res) ->
         cmd = (req.params.command or 'status').toLowerCase()
         if cmd == 'enable'
@@ -450,12 +445,6 @@ gulp.task 'bundle', (task_cb) ->
 
     aliases =
         'underscore': 'lodash'
-
-
-    _.each(glob.sync('./app/overrides/**/*'), (fn) ->
-        aliases["./"+path.relative('./app/overrides/', fn)] = fn
-    )
-
 
 
     externals = []
@@ -542,13 +531,13 @@ gulp.task 'bundle', (task_cb) ->
         )
         .transform((file) ->
             return through() if not (/\.coffee$/i).test(file)
-            buffer = ""
+            data = ""
             #TODO: make into a plugin!
             return through((buf) ->
-                buffer += buf
+                data += buf
             , ->
                 try
-                    data = ngClassify(buffer, ngClassifyOptions)
+                    data = ngClassify(data, ngClassifyOptions)
                     this.queue(data)
                     this.queue(null)
                 catch err
