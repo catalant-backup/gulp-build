@@ -659,6 +659,9 @@ gulp.task 'bundle', (task_cb) ->
                         console.log("app bundle finished:".green.underline + filesize('./.compiled/bundle/app.js'))
                     )
             )
+            .on('error', (err) ->
+                console.log(new gutil.PluginError("Browserify", err, showStack: yes).toString())
+            )
 
     rebundle()
     bundler.on('update', rebundle)
@@ -752,6 +755,13 @@ gulp.task "package:dist", (cb) ->
         .pipe(revReplace())
         .pipe(gulpIf('*.css', bless())) # fix ie9 4096 max selector per file evil
         .pipe(gulpIf('*.js', sourcemaps.write('.')))
+        .pipe(gulpIf('*.css', rework(reworkUrl((url) ->
+            if not url.match(/^\/modules/) and url.match(/\.(png|jpeg|jpg|gif)$/i)
+                arr = url.split("/")
+                last = arr[arr.length - 1]
+                return "/bower_images/#{last}"
+            return url
+        ))))
         # Cheap trick to fix source map URL
         .pipe(gulpIf('*.js', replace('//# sourceMappingURL=..', '//# sourceMappingURL=')))
         .pipe(gulp.dest(DIST_PATH))
