@@ -833,11 +833,11 @@ gulp.task "update",  ->
 
     getRemoteCode('gulpfile.coffee', (filename, remoteCode) ->
         tasks = []
-        remoteCode.replace(/require\(["']([\w\d_-]+)["']\)/g, (str, match) ->
+        remoteCode.replace(/[^\.]require\(["']([\w\d_-]+)["']\)/g, (str, match) ->
             try
                 require(match)
             catch e
-                tasks.push({cmd: "npm install #{match} --save", match: match})
+                tasks.push({cmd: "npm install #{match} --save-dev", match: match})
         )
         exec = require('child_process').exec
         require('async').eachSeries(tasks, (task, cb) ->
