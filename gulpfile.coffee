@@ -11,12 +11,9 @@ sass = require("gulp-sass")
 replace = require("gulp-replace")
 sourcemaps = require("gulp-sourcemaps")
 concat = require("gulp-concat")
-coffee = require("gulp-coffee")
 changed = require("gulp-changed")
 wiredep = require("wiredep").stream
-templateCache = require("gulp-angular-templatecache")
 inject = require("gulp-inject")
-coffeelint = require('gulp-coffeelint')
 del = require('del')
 vinylPaths = require('vinyl-paths')
 runSequence = require('run-sequence')
@@ -25,13 +22,11 @@ uglify = require('gulp-uglify')
 useref = require('gulp-useref')
 rename = require('gulp-rename')
 gulpIf = require('gulp-if')
-ngAnnotate = require('gulp-ng-annotate')
 imageop = require('gulp-image-optimization')
 #karma = require('karma').server
 #protractor = require("gulp-protractor").protractor
 rev = require('gulp-rev')
 revReplace = require('gulp-rev-replace')
-_ = require("underscore")
 header = require('gulp-header')
 plumber = require('gulp-plumber')
 gutil = require('gulp-util')
@@ -68,7 +63,6 @@ browserify_ngannotate = require('browserify-ngannotate')
 
 bowerResolve = require('bower-resolve')
 
-remapify = require('remapify')
 sassCssStream = require('sass-css-stream')
 browserifyInc = require('browserify-incremental')
 filesize = (f) ->
@@ -202,7 +196,6 @@ pathsForExt = (ext) ->
     ]
 paths =
     sass: pathsForExt('scss')
-    templates: pathsForExt('html')
     #coffee: pathsForExt('coffee')
     images: pathsForExt('+(png|jpg|gif|jpeg)')
     bower_images: './app/bower_components/**/*.+(png|jpg|gif|jpeg)'
@@ -475,13 +468,14 @@ gulp.task 'bundle', (task_cb) ->
                 f = path.join(__dirname, './app/bower_components/', name)
                 # put our stuff in the common bundle when it IS NOT a symlink
                 # otherwise, put into app bundle which has a watch on it.
-                return fs.realpathSync(f) == f
+                return fs.realpathSync(f) == f #include in common if not symlink
             if name == 'chai'
                 return false # this thing sucks
             return true
         ))
         b = browserify(opts) #need to call this AFTER expose is called  so that it mutates opts!!
-        b = browserifyInc(b, cacheFile: './.compiled/browserify_common_cache.json')
+        if not isProdBuild
+            b = browserifyInc(b, cacheFile: './.compiled/browserify_common_cache.json')
         _.each(glob.sync("./app/bower_components/**/*.+(html|scss)"), (fn) ->
             fn = path.join(__dirname, fn)
             opts.noParse.push(fn)
@@ -489,13 +483,12 @@ gulp.task 'bundle', (task_cb) ->
         _.each(registerFunctions, (fn) -> fn(b))
 
         b.require(path.join(__dirname, '.compiled', 'config.js'), expose: 'hn-config')
-        b.require(path.join(__dirname, '.compiled', 'templates.js'), expose: 'hn-templates')
         b.require('jquery')
         b.require('moment')
         b.require('angular')
         b.require('lodash')
 
-        externals = externals.concat(['hn-config', 'hn-templates', 'moment', 'angular', 'lodash', 'jquery'])
+        externals = externals.concat(['hn-config', 'moment', 'angular', 'lodash', 'jquery'])
         b.bundle()
             .pipe(source('./app/common.js'))
             .on('error', gutil.log.bind(gutil, 'Browserify Error'))
@@ -671,25 +664,6 @@ gulp.task 'bundle', (task_cb) ->
     bundler.on('update', rebundle)
     return
 
-
-gulp.task("templates", ->
-    if isProdBuild
-        return fs.writeFileSync(path.join(COMPILE_PATH, "templates.js", ""))
-
-    return gulp.src(dedupeGlobs(paths.templates))
-        # only templetize our own stuff, ignore rest of bower
-        .pipe(ignore(/bower_components\/(?!hn-)/))
-        .pipe(ignore(/index.html/))
-        .pipe(ignore(/hn-angular/)) #hn-angular-squire and hn-angular-ellipsis
-        .pipe(templateCache("templates.js",
-            module: 'hn.core'
-            root: '/'
-#            transformUrl: (file) ->
-#                return file.replace(/\/bower_components\/hn-[\w-]+\/app/, '')
-        ))
-        .pipe(gulp.dest(COMPILE_PATH))
-)
-
 bower_images = () ->
     return gulp.src(paths.bower_images)
     .pipe(rename( (file) ->
@@ -758,25 +732,8 @@ gulp.task "images", ->
         }))
         .pipe(gulp.dest(DIST_PATH))
 
-gulp.task "package-no-min:dist", ->
-    assets = useref.assets()
 
-    return gulp.src(COMPILE_PATH + "/index.html")
-        .pipe(rename({ extname: ".nomin.html" }))
-        .pipe(assets)
-        .pipe(gulpIf('*.js', ngAnnotate()))
-        .pipe(gulpIf('*.css', minifyCss({
-            cache: true
-            compatibility: 'colors.opacity' # ie doesnt like rgba values :P
-        })))
-        .pipe(rev())
-        .pipe(assets.restore())
-        .pipe(useref())
-        .pipe(revReplace())
-        .pipe(gulpIf('*.css', bless())) # fix ie9 4096 max selector per file evil
-        .pipe(gulp.dest(DIST_PATH))
-
-gulp.task "package:dist", ["package-no-min:dist"], (cb) ->
+gulp.task "package:dist", (cb) ->
     assets = useref.assets()
     return gulp.src(COMPILE_PATH + "/index.html")
         .pipe(assets)
@@ -1058,7 +1015,6 @@ gulp.task "default", (cb) ->
         #'clean:compiled'
         'bower_images:dev'
         'make_config'
-        'templates' # TODO: remove once working with browserify
         'copy_extras'
         'webserver'
         'bundle'
@@ -1070,7 +1026,6 @@ gulp.task "build", (cb) ->
         'clean:dist'
         'bower_images:dist'
         'make_config'
-        'templates' # TODO: remove once working with browserify
         'copy_extras'
         'bundle'
         'package:dist'
