@@ -60,7 +60,6 @@ uglify = require('gulp-uglify')
 cssmin = require('gulp-cssmin')
 aliasify = require('aliasify')
 browserify_ngannotate = require('browserify-ngannotate')
-minifyCssStream = require('minify-css-stream')
 
 bowerResolve = require('bower-resolve')
 
@@ -257,7 +256,6 @@ injectBundle = (task_cb, theme) ->
             transform: (filepath, file) ->
                 return """
                 <script src="/bower_components/jquery/dist/jquery.js"></script>
-                <script src="/bower_components/jstzdetect/jstz.js"></script>
                 <script src="/bower_components/js-base64/base64.js"></script>
                 <script src="/bower_components/sanitize.js/lib/sanitize.js"></script>"""
         )).pipe(inject(gulp.src(["./.compiled/bundle/#{themeName}"], read:false),
@@ -532,7 +530,7 @@ sassStream = (file, theme, vendorCss) ->
                             if not url.match(/^\/modules/) and url.match(/\.(png|jpeg|jpg|gif)$/i)
                                 return "/bower_images/#{_.last(url.split("/"))}"
                             return url
-                        )).toString(sourcemap: true)
+                        )).toString(sourcemap: false)
                         vendorCss[url] = contents
                     r =
                         contents: "/* note: [#{url}] was moved into vendor.css by build */"
