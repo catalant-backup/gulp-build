@@ -60,6 +60,7 @@ uglify = require('gulp-uglify')
 cssmin = require('gulp-cssmin')
 aliasify = require('aliasify')
 browserify_ngannotate = require('browserify-ngannotate')
+minifyCssStream = require('minify-css-stream')
 
 bowerResolve = require('bower-resolve')
 
@@ -222,17 +223,28 @@ gulp.task "clean:dist",  ->
         .pipe(vinylPaths(del))
 
 
-injectBundle = (task_cb=->) ->
+injectBundle = (task_cb, theme) ->
     target = gulp.src("./app/index.html")
+
+    if theme
+        filename = theme.index
+        themeName = theme.filename
+        themeType = theme.type
+    else
+        filename = "index.html"
+        themeName = "app.css"
+        themeType = "public-enterprise"
+
     sources = gulp.src([
-        "./.compiled/bundle/vendor.css"
-        "./.compiled/bundle/app.css"
         "./.compiled/bundle/*.map"
         "./.compiled/bundle/common.js"
         "./.compiled/bundle/app.js"
     ], read: false)
 
+
     return target
+        .pipe(rename(filename))
+        .pipe(replace('APP_TYPE_CLASS', themeType))
         .pipe(inject(sources,
             transform:  (filepath) ->
                 filepath = path.normalize(path.join(config.dev_server.staticRoot, filepath))
@@ -248,10 +260,25 @@ injectBundle = (task_cb=->) ->
                 <script src="/bower_components/jstzdetect/jstz.js"></script>
                 <script src="/bower_components/js-base64/base64.js"></script>
                 <script src="/bower_components/sanitize.js/lib/sanitize.js"></script>"""
+        )).pipe(inject(gulp.src(["./.compiled/bundle/#{themeName}"], read:false),
+            starttag: '<!-- theme_css -->',
+            endtag: '<!-- end_theme_css -->'
+            transform:  (filepath) ->
+                  filepath = path.normalize(path.join(config.dev_server.staticRoot, filepath))
+                  filepath = filepath.replace('/.compiled', '') #TODO
+                  return inject.transform.apply(inject.transform, [filepath])
+        )).pipe(inject(gulp.src(["./.compiled/bundle/vendor.css"], read:false),
+            starttag: '<!-- vendor_css -->',
+            endtag: '<!-- end_vendor_css -->'
+            transform:  (filepath) ->
+                  filepath = path.normalize(path.join(config.dev_server.staticRoot, filepath))
+                  filepath = filepath.replace('/.compiled', '') #TODO
+                  return inject.transform.apply(inject.transform, [filepath])
         ))
+
         .pipe(gulp.dest(COMPILE_PATH))
         .on("end", ->
-            task_cb()
+            task_cb and task_cb()
         )
 
 gulp.task('inject:build_meta', ->
@@ -272,14 +299,19 @@ gulp.task "webserver", (cb) ->
 
     fallback = (req, res, next) ->
         if SERVE_MINFIED
-            f = path.join(__dirname, DIST_PATH, "index.html")
+            folderPath = path.join(__dirname, DIST_PATH)
         else
-            f = path.join(__dirname, COMPILE_PATH, "index.html")
+            folderPath = path.join(__dirname, COMPILE_PATH)
 
-        if fs.existsSync(f)
-            res.sendFile(f)
+        themeFile = path.join(folderPath, req.hostname + ".index.html")
+        if fs.existsSync(themeFile)
+            res.sendFile(themeFile)
         else
-            res.send("<html><meta http-equiv='refresh' content='1'><br><br><br><center><h1>Still Gulping...")
+            f = path.join(folderPath, "index.html")
+            if fs.existsSync(f)
+                res.sendFile(f)
+            else
+                res.send("<html><meta http-equiv='refresh' content='1'><br><br><br><center><h1>Still Gulping...")
 
     backend = config.backends[config.dev_server.backend]
     app = express()
@@ -427,10 +459,141 @@ getNPMPackageNames = ->
         # does not have a package.json manifest
     return _.keys(packageManifest.dependencies) or []
 
+getThemes = () ->
+    try
+        themes = JSON.parse(fs.readFileSync(path.join(__dirname, 'themes.json')))
+    catch e
+        themes = []
+    _.each(themes, (theme) ->
+        theme.filename = "theme_"+_.snakeCase(theme.name)+".css"
+        theme.index = theme.domain+".index.html"
+    )
+    return themes
 
-gulp.task 'bundle', (task_cb) ->
+sassStream = (file, theme, vendorCss) ->
 
-    if isProdBuild
+    fileName = path.basename(file)
+    if fileName.match(/^(_|\.)/)
+        return through((() ->), () ->
+            this.queue('.node-sass-bug-fixer { content:"its a bug";}')
+            this.queue(null)
+        )
+
+    Color = require('node-sass').types.Color
+    Null = require('node-sass').types.Null()
+
+    hexToColor = (hex) ->
+        hex = parseInt(hex.substring(1), 16)
+        r = hex >> 16
+        g = hex >> 8 & 0xFF
+        b = hex & 0xFF
+        return new Color(r, g, b)
+
+    return sassCssStream( file, {
+        includePaths: [
+            './app/',
+            './app/bower_components/hn-core/app/',
+            './app/bower_components/'
+        ]
+        precision: 8
+        sourceMap: not isProdBuild #"./compiled/bundle/styles.css.map"
+        sourceMapContents: false
+        sourceMapEmbed: true
+        sourceMapRoot: "."
+        functions:
+            "theme-color($color, $d:null)": (name, d) ->
+                name = name.getValue()
+
+                c = theme[name + "_color"]
+                if _.isString(c)
+                    return hexToColor(c)
+                else if _.isArray(c)
+                    return new Color(c[0], c[1], c[2], c[3]) #support alpha
+                else if d
+                    return d
+                else
+                    console.log("SASS Error:".red.underline + " cannot find theme color " + name + " from theme #{theme.name}")
+                    return Null
+
+        importer: (url, fromFile) ->
+            if url.match(/\.css$/i)
+                if not vendorCss #themes dont pass this in
+                    return {contents: "", file: file}
+
+                file = path.join(__dirname, "./app/bower_components", url)
+                if vendorCss[url] or fs.existsSync(file)
+                    if not vendorCss[url]
+                        contents = fs.readFileSync(file, 'utf8').toString()
+                        contents = rework(contents, source: url).use(reworkUrl((url) ->
+                            if not url.match(/^\/modules/) and url.match(/\.(png|jpeg|jpg|gif)$/i)
+                                return "/bower_images/#{_.last(url.split("/"))}"
+                            return url
+                        )).toString(sourcemap: true)
+                        vendorCss[url] = contents
+                    r =
+                        contents: "/* note: [#{url}] was moved into vendor.css by build */"
+                        file: file
+                    return r
+                else
+                    console.log("SASS CSS Import Error:".red.underline
+                        " cannot @import url: "
+                        "[#{url}] from: [#{fromFile}] file not found: #{file}")
+            return
+    })
+
+buildStyles = (bundler, watch,  output, onDone) ->
+    vendorCss = {}
+    themes = getThemes()
+    bundleDir = path.join(COMPILE_PATH,  "bundle")
+    if not fs.existsSync(bundleDir)
+        fs.mkdirSync(bundleDir)
+
+    _.each(themes, (theme) ->
+        dest = path.join(bundleDir, theme.filename)
+        theme.stream = fs.createWriteStream(dest)
+        theme.stream.setMaxListeners(500) # more might be needed?
+    )
+    options = {
+        watch: watch
+    #    logLevel: "verbose"
+        bundles: {
+            style: output
+        }
+        appTransforms: [
+            # need an wrapper function to pass options to the stream transformer
+            (file) ->
+                pass = through()
+                _.each(themes, (theme) -> # build themes, if any
+                    pass.pipe(sassStream(file, theme)).pipe(theme.stream, end:false)
+                )
+                return pass
+            (file) ->
+                return sassStream(file, {}, vendorCss) # build the 'default' theme
+        ],
+        appTransformDirs: [
+            './app/', './app/bower_components/',
+            fs.realpathSync(path.join(__dirname, './app/bower_components/hn-core/app/'))
+        ]
+    }
+    p = parcelify(bundler, options)
+    p.on('done', ->
+        console.log(">> theme [default]:".green + filesize('./.compiled/bundle/app.css'))
+        _.each(themes, (theme) ->
+            injectBundle((->), theme)
+            console.log(">> theme [#{theme.name}]:".green + filesize(path.join(bundleDir, theme.filename)))
+        )
+        onDone and onDone(null, _.values(vendorCss).join("\n\n"))
+    )
+    p.on('error', (err) ->
+        onDone and onDone(err, null)
+        onDone = null
+    )
+
+    return p
+
+
+bundle = (watch, task_cb) ->
+    if not watch
         watchify = browserifyInc = (b) ->
             return b
 
@@ -563,76 +726,9 @@ gulp.task 'bundle', (task_cb) ->
     if isProdBuild
         bundler.plugin(require('bundle-collapser/plugin'))
 
-    vendorCss = {}
-    p = parcelify(bundler, {
-        watch: true
-    #    logLevel: "verbose"
-        bundles: {
-            style: './.compiled/bundle/app.css'
-        }
-        # if passing options is not necessary this transform should be defined in the
-        #  package.json like so `"transforms": ["sass-css-stream"]`
-        appTransforms: [
-            # need an wrapper function to pass options to the stream transformer
-            (file) ->
-                fileName = path.basename(file)
-                if fileName.match(/^(_|\.)/)
-                    return through((() ->), () ->
-                        this.queue('.node-sass-bug-fixer { content:"its a bug";}')
-                        this.queue(null)
-                    )
-                return sassCssStream( file,
-                    includePaths: [
-                        './app/',
-                        './app/bower_components/hn-core/app/',
-                        './app/bower_components/'
-                    ]
-                    precision: 8
-                    sourceMap: not isProdBuild #"./compiled/bundle/styles.css.map"
-                    sourceMapContents: false
-                    sourceMapEmbed: true
-                    sourceMapRoot: "."
-                    importer: (url, fromFile) ->
-                        if url.match(/\.css$/i)
-                            file = path.join(__dirname, "./app/bower_components", url)
-                            if fs.existsSync(file)
-                                contents = fs.readFileSync(file, 'utf8').toString()
-                                contents = rework(contents, source: url).use(reworkUrl((url) ->
-                                    if not url.match(/^\/modules/) and url.match(/\.(png|jpeg|jpg|gif)$/i)
-                                        return "/bower_images/#{_.last(url.split("/"))}"
-                                    return url
-                                )).toString(sourcemap: true)
-                                r =
-                                    contents: "/* note: [#{url}] was moved into vendor.css by build */"
-                                    file: file
-                                vendorCss[url] = contents
-                                return r
-                            else
-                                console.log("SASS CSS Import Error:".red.underline
-                                    " cannot @import url: "
-                                    "[#{url}] from: [#{fromFile}] file not found: #{file}")
-                        return
 
-
-                    onError: (err) ->
-                        file_path = err.file?.replace(__dirname, "")
-                        console.log("SASS Error:".red.underline
-                            err.message.bold
-                            'in file'
-                            file_path?.bold
-                            'on line'
-                            (err.line+'').bold
-                            'column'
-                            (err.column+'').bold)
-                )
-        ],
-        appTransformDirs: [
-            './app/', './app/bower_components/',
-            fs.realpathSync(path.join(__dirname, './app/bower_components/hn-core/app/'))
-        ]
-    })
-    p.on('done', ->
-        fs.writeFileSync("./.compiled/bundle/vendor.css", _.values(vendorCss).join("\n\n"))
+    buildStyles(bundler, watch, './.compiled/bundle/app.css', (err, vendorCss) ->
+        fs.writeFileSync("./.compiled/bundle/vendor.css", vendorCss)
         injectBundle(->
             console.log("css bundle finished:".green.underline + filesize('./.compiled/bundle/vendor.css'))
             task_cb()
@@ -649,8 +745,6 @@ gulp.task 'bundle', (task_cb) ->
             .pipe(source('./app/app.js'))
             .on('error', gutil.log.bind(gutil, 'Browserify Error'))
             .pipe(buffer())
-#            .pipe(sourcemaps.init(loadMaps: true))
-#            .pipe(sourcemaps.write())
             .pipe($.flatten())
             .pipe(gulp.dest('.compiled/bundle', {base: '.compiled'}))
             .on('end', ->
@@ -666,6 +760,12 @@ gulp.task 'bundle', (task_cb) ->
     rebundle()
     bundler.on('update', rebundle)
     return
+
+gulp.task 'bundle', (task_cb) ->
+    bundle(true, task_cb)
+
+gulp.task 'bundle:dist', (task_cb) ->
+    bundle(false, task_cb)
 
 bower_images = () ->
     return gulp.src(paths.bower_images)
@@ -735,13 +835,49 @@ gulp.task "images", ->
         }))
         .pipe(gulp.dest(DIST_PATH))
 
+createThemedIndex = (from, theme) ->
+    data = fs.readFileSync(path.join(from, "index.html"), 'utf8')
+    result = data.replace(/(([ \t]*)<!--\s*theme:*(\S*)\s*-->)(\n|\r|.)*?(<!--\s*endtheme\s*-->)/gi, (str, a, b) ->
+        return """
+<!-- build:css /css/#{theme.filename} -->
+<link rel="stylesheet" href="/bundle/#{theme.filename}">
+<!-- endbuild -->
+"""
+    )
+    dest = path.join(COMPILE_PATH, theme.index)
+    fs.writeFileSync(dest, result)
+    return dest
 
-gulp.task "package:dist", (cb) ->
+
+gulp.task "package:themes", ["package:dist"], (cb) ->
+    themes = getThemes()
+
+    async.eachSeries(themes, (theme, cb) ->
+        src = createThemedIndex(DIST_PATH, theme)
+        assets = useref.assets()
+        gulp.src(src)
+            .pipe(assets)
+            .pipe(gulpIf("*.css", minifyCss({
+                cache: true
+                compatibility: 'colors.opacity' # ie doesnt like rgba values :P
+            })))
+            .pipe(rev())
+            .pipe(assets.restore())
+            .pipe(useref())
+            .pipe(gulpIf('*.css', rename({ extname: '.min.css' })))
+            .pipe(revReplace())
+            .pipe(gulpIf('*.css', bless())) # fix ie9 4096 max selector per file evil
+            .pipe(gulp.dest(DIST_PATH))
+            .on('end', ->
+                cb()
+            )
+    , cb)
+
+gulp.task "package:dist", () ->
     assets = useref.assets()
-    return gulp.src(COMPILE_PATH + "/index.html")
+    return gulp.src(path.join(COMPILE_PATH, "index.html"))
         .pipe(assets)
         .pipe(gulpIf('*.js', sourcemaps.init()))
-        .pipe(gulpIf('*.js', ngAnnotate()))
         .pipe(gulpIf('*.css', minifyCss({
             cache: true
             compatibility: 'colors.opacity' # ie doesnt like rgba values :P
@@ -755,22 +891,9 @@ gulp.task "package:dist", (cb) ->
         .pipe(revReplace())
         .pipe(gulpIf('*.css', bless())) # fix ie9 4096 max selector per file evil
         .pipe(gulpIf('*.js', sourcemaps.write('.')))
-        .pipe(gulpIf('*.css', rework(reworkUrl((url) ->
-            if not url.match(/^\/modules/) and url.match(/\.(png|jpeg|jpg|gif)$/i)
-                arr = url.split("/")
-                last = arr[arr.length - 1]
-                return "/bower_images/#{last}"
-            return url
-        ))))
         # Cheap trick to fix source map URL
         .pipe(gulpIf('*.js', replace('//# sourceMappingURL=..', '//# sourceMappingURL=')))
         .pipe(gulp.dest(DIST_PATH))
-
-        .on('end', _.once(->
-            console.log("gulpfile@797:", "done1")
-
-            cb()
-        ))
 
 makeConfig = (isDebug, cb) ->
     configs = glob.sync(BOWER_PATH+"/**/bower.json")
@@ -818,7 +941,7 @@ gulp.task "update",  ->
         req = https.request({
             host: 'raw.githubusercontent.com',
             port: 443,
-            path: '/HourlyNerd/gulp-build/browserify/' + filename,
+            path: '/HourlyNerd/gulp-build/themes/' + filename,
             method: 'GET'
             agent: false
         }, (res) ->
@@ -840,7 +963,7 @@ gulp.task "update",  ->
                 tasks.push({cmd: "npm install #{match} --save-dev", match: match})
         )
         exec = require('child_process').exec
-        require('async').eachSeries(tasks, (task, cb) ->
+        async.eachSeries(tasks, (task, cb) ->
             console.log("npm module '#{task.match}' is missing, installing..")
             exec(task.cmd, (err, stdout) ->
                 console.log("couldnt npm install '#{task.match}' because:", err) if err
@@ -1037,6 +1160,10 @@ gulp.task "build", (cb) ->
         'bower_images:dist'
         'make_config'
         'copy_extras'
-        'bundle'
-        'package:dist'
+        'bundle:dist'
+        'package:themes'
         cb)
+
+
+if fs.existsSync('./custom_gulp_tasks.coffee')
+    require('./custom_gulp_tasks.coffee')(gulp)
