@@ -522,6 +522,9 @@ sassStream = (file, theme, vendorCss) ->
                     return {contents: "", file: file}
 
                 file = path.join(__dirname, "./app/bower_components", url)
+                if not fs.existsSync(file)
+                    file = path.join(__dirname, "./node_modules", url) # look there too!
+
                 if vendorCss[url] or fs.existsSync(file)
                     if not vendorCss[url]
                         contents = fs.readFileSync(file, 'utf8').toString()
