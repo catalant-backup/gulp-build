@@ -104,7 +104,7 @@ local_config = (update) ->
                 return JSON.parse(fs.readFileSync(cfg))
             catch e
                 console.error('could not json parse local config file:', cfg, e)
-                return {
+                return {}
 
     if arguments.length == 0
         return read()
