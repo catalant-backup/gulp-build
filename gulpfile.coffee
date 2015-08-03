@@ -572,7 +572,7 @@ buildStyles = (bundler, watch,  output, onDone) ->
                 return sassStream(file, {}, vendorCss) # build the 'default' theme
         ],
         appTransformDirs: [
-            './app/', './app/bower_components/',
+            './app/', './app/bower_components/', './node_modules/',
             fs.realpathSync(path.join(__dirname, './app/bower_components/hn-core/app/'))
         ]
     }
