@@ -85,6 +85,7 @@ SERVE_MINFIED = false #serve dist, toggle to true, gulp build, then gulp webserv
 buildEnv = 'dev'
 isProdBuild = false # Deprecated with buildEnv, left here temporarily for legacy purposes.
 cacheEnabled = false #to enable, in app console: apicache.enable() and .disable() .clear() .status()
+ravenDsn = ''
 
 # read or update local config - no args = read, or update with an object
 local_config = (update) ->
@@ -103,7 +104,7 @@ local_config = (update) ->
                 return JSON.parse(fs.readFileSync(cfg))
             catch e
                 console.error('could not json parse local config file:', cfg, e)
-                return {}
+                return {
 
     if arguments.length == 0
         return read()
@@ -116,6 +117,9 @@ config.dev_server.backend = local_config().backend or "local"
 
 if '--staging' in process.argv
     config.dev_server.backend = 'staging'
+
+if '--local' in process.argv
+    config.dev_server.backend = 'local'
 
 console.log("Using Backend: "+config.dev_server.backend.toUpperCase().red.underline)
 console.log("API cache ENABLED".green.underline) if cacheEnabled
@@ -137,6 +141,12 @@ if '--ugly' in process.argv
 if '--verbose' in process.argv
     LOG_PROXY_HEADERS = true
     console.log("====== verbose proxy header logging enabled ======".red.underline)
+
+if yargs.argv.raven_dsn
+    ravenDsn = yargs.argv.raven_dsn
+else
+    if config.raven_dsn_env_map? and buildEnv of config.raven_dsn_env_map
+        ravenDsn = config.raven_dsn_env_map[buildEnv]
 
 gitHash = 'didnt find it yet'
 require('child_process').exec('git log -1 --pretty=format:Hash:%H%nDate:%ai', (err, stdout) ->
@@ -244,6 +254,56 @@ injectBundle = (task_cb, theme) ->
     return target
         .pipe(rename(filename))
         .pipe(replace('APP_TYPE_CLASS', themeType))
+        .pipe(gulpIf(ravenDsn != '', inject(sources,
+            starttag: '<!-- raven -->',
+            endtag: '<!-- end_raven -->'
+            transform: (filepath, file) ->
+                return """
+                <script src="http://cdnjs.cloudflare.com/ajax/libs/raven.js/1.0.8/raven.min.js"></script>
+                <script>
+                Raven.config('#{ravenDsn}', {
+                  logger: 'javascript',
+                  ignoreErrors: [
+                    // Random plugins/extensions
+                    'top.GLOBALS',
+                    // See: http://blog.errorception.com/2012/03/tale-of-unfindable-js-error. html
+                    'originalCreateNotification',
+                    'canvas.contentDocument',
+                    'MyApp_RemoveAllHighlights',
+                    'http://tt.epicplay.com',
+                    'Can\'t find variable: ZiteReader',
+                    'jigsaw is not defined',
+                    'ComboSearch is not defined',
+                    'http://loading.retry.widdit.com/',
+                    'atomicFindClose',
+                    // Facebook borked
+                    'fb_xd_fragment',
+                    // ISP "optimizing" proxy - `Cache-Control: no-transform` seems to reduce this. (thanks @acdha)
+                    // See http://stackoverflow.com/questions/4113268/how-to-stop-javascript-injection-from-vodafone-proxy
+                    'bmi_SafeAddOnload',
+                    'EBCallBackMessageReceived',
+                    // See http://toolbar.conduit.com/Developer/HtmlAndGadget/Methods/JSInjection.aspx
+                    'conduitPage'
+                  ],
+                  ignoreUrls: [
+                    // Facebook flakiness
+                    /graph\.facebook\.com/i,
+                    // Facebook blocked
+                    /connect\.facebook\.net\/en_US\/all\.js/i,
+                    // Woopra flakiness
+                    /eatdifferent\.com\.woopra-ns\.com/i,
+                    /static\.woopra\.com\/js\/woopra\.js/i,
+                    // Chrome extensions
+                    /extensions\//i,
+                    /^chrome:\/\//i,
+                    // Other plugins
+                    /127\.0\.0\.1:4001\/isrunning/i,  // Cacaoweb
+                    /webappstoolbarba\.texthelp\.com\//i,
+                    /metrics\.itunes\.apple\.com\.edgesuite\.net\//i
+                  ]
+                }).install();
+                </script>"""
+        )))
         .pipe(inject(sources,
             transform:  (filepath) ->
                 filepath = path.normalize(path.join(config.dev_server.staticRoot, filepath))
@@ -256,7 +316,6 @@ injectBundle = (task_cb, theme) ->
             transform: (filepath, file) ->
                 return """
                 <script src="/bower_components/jquery/dist/jquery.js"></script>
-                <script src="/bower_components/js-base64/base64.js"></script>
                 <script src="/bower_components/sanitize.js/lib/sanitize.js"></script>"""
         )).pipe(inject(gulp.src(["./.compiled/bundle/#{themeName}"], read:false),
             starttag: '<!-- theme_css -->',
@@ -652,8 +711,9 @@ bundle = (watch, task_cb) ->
         b.require('moment')
         b.require('angular')
         b.require('lodash')
+        b.require('js-base64')
 
-        externals = externals.concat(['hn-config', 'moment', 'angular', 'lodash', 'jquery'])
+        externals = externals.concat(['hn-config', 'moment', 'angular', 'lodash', 'jquery', 'js-base64'])
         b.bundle()
             .pipe(source('./app/common.js'))
             .on('error', gutil.log.bind(gutil, 'Browserify Error'))
@@ -917,6 +977,7 @@ makeConfig = (isDebug, cb) ->
         hash: gitHash
         app_host: config.app_host
         build_env: buildEnv
+        raven_dsn: ravenDsn
     })
 
     template = """
