@@ -586,6 +586,7 @@ gulp.task 'bundle', (task_cb) ->
                         './app/',
                         './app/bower_components/hn-core/app/',
                         './app/bower_components/'
+                        './node_modules/',
                     ]
                     precision: 8
                     sourceMap: not isProdBuild #"./compiled/bundle/styles.css.map"
