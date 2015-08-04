@@ -884,11 +884,11 @@ gulp.task "copy_extras:dist", ->
 
 gulp.task "images", ->
     return gulp.src(dedupeGlobs(paths.images))
-        .pipe(imageop({
-            optimizationLevel: 5
-            progressive: true
-            interlaced: true
-        }))
+#        .pipe(imageop({
+#            optimizationLevel: 5
+#            progressive: true
+#            interlaced: true
+#        }))
         .pipe(gulp.dest(DIST_PATH))
 
 createThemedIndex = (from, theme) ->
@@ -1215,6 +1215,7 @@ gulp.task "build", (cb) ->
         'clean:compiled'
         'clean:dist'
         'bower_images:dist'
+        'images'
         'make_config'
         'copy_extras'
         'bundle:dist'
