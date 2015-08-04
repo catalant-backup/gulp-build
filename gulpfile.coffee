@@ -310,14 +310,7 @@ injectBundle = (task_cb, theme) ->
                 filepath = filepath.replace('/.compiled', '') #TODO
                 return inject.transform.apply(inject.transform, [filepath])
         ))
-        .pipe(inject(gulp.src('./bower.json'),
-            starttag: '<!-- browserify_temp_hack -->',
-            endtag: '<!-- end_browserify_temp_hack -->'
-            transform: (filepath, file) ->
-                return """
-                <script src="/bower_components/jquery/dist/jquery.js"></script>
-                <script src="/bower_components/sanitize.js/lib/sanitize.js"></script>"""
-        )).pipe(inject(gulp.src(["./.compiled/bundle/#{themeName}"], read:false),
+        .pipe(inject(gulp.src(["./.compiled/bundle/#{themeName}"], read:false),
             starttag: '<!-- theme_css -->',
             endtag: '<!-- end_theme_css -->'
             transform:  (filepath) ->
@@ -636,6 +629,7 @@ buildStyles = (bundler, watch,  output, onDone) ->
             fs.realpathSync(path.join(__dirname, './app/bower_components/hn-core/app/'))
         ]
     }
+
     p = parcelify(bundler, options)
     p.on('done', ->
         console.log(">> theme [default]:".green + filesize('./.compiled/bundle/app.css'))
