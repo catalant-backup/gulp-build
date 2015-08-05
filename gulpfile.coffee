@@ -904,7 +904,7 @@ createThemedIndex = (from, theme) ->
 <!-- endbuild -->
 """
     )
-    result = data.replace(/(([ \t]*)<!--\s*theme_class:*(\S*)\s*-->)(\n|\r|.)*?(<!--\s*endtheme_class\s*-->)/gi, (str, a, b) ->
+    result = result.replace(/(([ \t]*)<!--\s*theme_class:*(\S*)\s*-->)(\n|\r|.)*?(<!--\s*endtheme_class\s*-->)/gi, (str, a, b) ->
         return str.replace(/(private|public)-enterprise/, theme.type)
     )
 
