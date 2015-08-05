@@ -201,13 +201,11 @@ pathsForExt = (ext) ->
     return [
         "./app/**/*.#{ext}"
         "./app/bower_components/hn-core/app/**/*.#{ext}"
-        "./app/bower_components/hn-nerds-components/app/**/*.#{ext}"
-        "./app/bower_components/hn-projects-components/app/**/*.#{ext}"
     ]
 paths =
     sass: pathsForExt('scss')
     #coffee: pathsForExt('coffee')
-    images: pathsForExt('+(png|jpg|gif|jpeg)')
+    images: pathsForExt('+(png|jpg|gif|jpeg|svg)')
     bower_images: './app/bower_components/**/*.+(png|jpg|gif|jpeg)'
     fonts: BOWER_PATH + '/**/*.+(woff|woff2|svg|ttf|eot|otf)'
     runtimes: BOWER_PATH + '/**/*.+(xap|swf)'
@@ -251,15 +249,23 @@ injectBundle = (task_cb, theme) ->
     ], read: false)
 
 
+    tr = (filepath) ->
+        filepath = path.normalize(path.join(config.dev_server.staticRoot, filepath))
+        filepath = filepath.replace('/.compiled', '') #TODO
+        return inject.transform.apply(inject.transform, [filepath])
+
     return target
         .pipe(rename(filename))
         .pipe(replace('APP_TYPE_CLASS', themeType))
-        .pipe(gulpIf(ravenDsn != '', inject(sources,
+        .pipe(inject(sources,
+            transform:  tr
+        ))
+        .pipe(gulpIf(ravenDsn != '', inject(gulp.src(["./.compiled/index.html"], read:false),
             starttag: '<!-- raven -->',
             endtag: '<!-- end_raven -->'
             transform: (filepath, file) ->
                 return """
-                <script src="http://cdnjs.cloudflare.com/ajax/libs/raven.js/1.0.8/raven.min.js"></script>
+                <script src="//cdnjs.cloudflare.com/ajax/libs/raven.js/1.1.16/raven.min.js"></script>
                 <script>
                 Raven.config('#{ravenDsn}', {
                   logger: 'javascript',
@@ -271,7 +277,7 @@ injectBundle = (task_cb, theme) ->
                     'canvas.contentDocument',
                     'MyApp_RemoveAllHighlights',
                     'http://tt.epicplay.com',
-                    'Can\'t find variable: ZiteReader',
+                    "Can't find variable: ZiteReader",
                     'jigsaw is not defined',
                     'ComboSearch is not defined',
                     'http://loading.retry.widdit.com/',
@@ -287,43 +293,27 @@ injectBundle = (task_cb, theme) ->
                   ],
                   ignoreUrls: [
                     // Facebook flakiness
-                    /graph\.facebook\.com/i,
+                    /graph\\.facebook\\.com/i,
                     // Facebook blocked
-                    /connect\.facebook\.net\/en_US\/all\.js/i,
+                    /connect\\.facebook\\.net\\/en_US\\/all\\.js/i,
                     // Woopra flakiness
-                    /eatdifferent\.com\.woopra-ns\.com/i,
-                    /static\.woopra\.com\/js\/woopra\.js/i,
+                    /eatdifferent\\.com\\.woopra-ns\\.com/i,
+                    /static\\.woopra\\.com\\/js\\/woopra\\.js/i,
                     // Chrome extensions
-                    /extensions\//i,
-                    /^chrome:\/\//i,
+                    /extensions\\//i,
+                    /^chrome:\\/\\//i,
                     // Other plugins
-                    /127\.0\.0\.1:4001\/isrunning/i,  // Cacaoweb
-                    /webappstoolbarba\.texthelp\.com\//i,
-                    /metrics\.itunes\.apple\.com\.edgesuite\.net\//i
+                    /127\\.0\\.0\\.1:4001\\/isrunning/i,  // Cacaoweb
+                    /webappstoolbarba\\.texthelp\\.com\\//i,
+                    /metrics\\.itunes\\.apple\\.com\\.edgesuite\\.net\\//i
                   ]
                 }).install();
                 </script>"""
         )))
-        .pipe(inject(sources,
-            transform:  (filepath) ->
-                filepath = path.normalize(path.join(config.dev_server.staticRoot, filepath))
-                filepath = filepath.replace('/.compiled', '') #TODO
-                return inject.transform.apply(inject.transform, [filepath])
-        ))
         .pipe(inject(gulp.src(["./.compiled/bundle/#{themeName}"], read:false),
             starttag: '<!-- theme_css -->',
             endtag: '<!-- end_theme_css -->'
-            transform:  (filepath) ->
-                  filepath = path.normalize(path.join(config.dev_server.staticRoot, filepath))
-                  filepath = filepath.replace('/.compiled', '') #TODO
-                  return inject.transform.apply(inject.transform, [filepath])
-        )).pipe(inject(gulp.src(["./.compiled/bundle/vendor.css"], read:false),
-            starttag: '<!-- vendor_css -->',
-            endtag: '<!-- end_vendor_css -->'
-            transform:  (filepath) ->
-                  filepath = path.normalize(path.join(config.dev_server.staticRoot, filepath))
-                  filepath = filepath.replace('/.compiled', '') #TODO
-                  return inject.transform.apply(inject.transform, [filepath])
+            transform:  tr
         ))
 
         .pipe(gulp.dest(COMPILE_PATH))
@@ -941,12 +931,14 @@ gulp.task "package:dist", () ->
         .pipe(rev())
         .pipe(assets.restore())
         .pipe(useref())
+        .pipe(gulp.dest(DIST_PATH))
         .pipe(gulpIf('*.js', uglify()))
         .pipe(gulpIf('*.js', rename({ extname: '.min.js' })))
         .pipe(gulpIf('*.css', rename({ extname: '.min.css' })))
         .pipe(revReplace())
         .pipe(gulpIf('*.css', bless())) # fix ie9 4096 max selector per file evil
-        .pipe(gulpIf('*.js', sourcemaps.write('.')))
+        # We do this to make it easier to snag the actual un-minified source via a browser
+        .pipe(gulpIf('*.js', sourcemaps.write('.', {includeContent: false, sourceRoot: '/'})))
         # Cheap trick to fix source map URL
         .pipe(gulpIf('*.js', replace('//# sourceMappingURL=..', '//# sourceMappingURL=')))
         .pipe(gulp.dest(DIST_PATH))
