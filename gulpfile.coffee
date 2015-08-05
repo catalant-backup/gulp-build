@@ -202,8 +202,8 @@ ngClassifyOptions =
         suffix: ''
 pathsForExt = (ext) ->
     return [
-        "./app/**/*.#{ext}"
         "./app/bower_components/hn-core/app/**/*.#{ext}"
+        "./app/**/*.#{ext}"
     ]
 paths =
     sass: pathsForExt('scss')
