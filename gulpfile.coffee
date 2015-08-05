@@ -121,6 +121,9 @@ if '--staging' in process.argv
 if '--local' in process.argv
     config.dev_server.backend = 'local'
 
+if '--test' in process.argv
+    config.dev_server.backend = 'test'
+
 console.log("Using Backend: "+config.dev_server.backend.toUpperCase().red.underline)
 console.log("API cache ENABLED".green.underline) if cacheEnabled
 
@@ -242,20 +245,6 @@ injectBundle = (task_cb, theme) ->
         themeName = "app.css"
         themeType = "public-enterprise"
 
-    ###
-    NOTE: when doing a gulp build, the way that works is that themed html files
-    are not actually used. it builds the entire app starting with index.html (default theme)
-    it then copies from dist/index.html to .compiled/[theme domain].index.html and at the
-    same time replaces the block where the theme goes with the uncompled theme.css file
-    it also replaces the APP_TYPE_CLASS with the correct type for that theme, after that it
-    builds that file into dist.
-    The result of that operation is that only the theme.css gets compiled, the compiled js is reused
-
-    It would be better to change the process to inject the built js into the .compiled theme file and then
-    build the css
-
-    createThemedIndex is the function that does this stuff
-     ###
     sources = gulp.src([
         "./.compiled/bundle/*.map"
         "./.compiled/bundle/common.js"
@@ -887,7 +876,7 @@ gulp.task "copy_extras:dist", ->
     copyExtras('fonts', 'runtimes', DIST_PATH)
 
 gulp.task "images", ->
-    return gulp.src(dedupeGlobs(paths.images))
+    return gulp.src(paths.images)
 #        .pipe(imageop({
 #            optimizationLevel: 5
 #            progressive: true
@@ -904,10 +893,6 @@ createThemedIndex = (from, theme) ->
 <!-- endbuild -->
 """
     )
-    result = result.replace(/(([ \t]*)<!--\s*theme_class:*(\S*)\s*-->)(\n|\r|.)*?(<!--\s*endtheme_class\s*-->)/gi, (str, a, b) ->
-        return str.replace(/(private|public)-enterprise/, theme.type)
-    )
-
     dest = path.join(COMPILE_PATH, theme.index)
     fs.writeFileSync(dest, result)
     return dest
@@ -1224,8 +1209,8 @@ gulp.task "build", (cb) ->
     runSequence(
         'clean:compiled'
         'clean:dist'
-        'bower_images:dist'
         'images'
+        'bower_images:dist'
         'make_config'
         'copy_extras'
         'bundle:dist'
