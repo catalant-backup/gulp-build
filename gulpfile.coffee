@@ -64,9 +64,11 @@ browserify_ngannotate = require('browserify-ngannotate')
 bowerResolve = require('bower-resolve')
 
 sassCssStream = require('sass-css-stream')
-browserifyInc = require('browserify-incremental')
-filesize = (f) ->
-    return " "+require('filesize')(fs.statSync(path.join(__dirname, f)).size)
+#browserifyInc = require('browserify-incremental')
+filesize = (f, isAbsolute=false) ->
+    return "??" if not f
+    p = if isAbsolute then f else path.join(__dirname, f)
+    return " "+require('filesize')(fs.statSync(p).size)
 
 SegfaultHandler = require('segfault-handler')
 SegfaultHandler.registerHandler()
@@ -642,7 +644,7 @@ buildStyles = (bundler, watch,  output, onDone) ->
 
 bundle = (watch, task_cb) ->
     if not watch
-        watchify = browserifyInc = (b) ->
+        watchify = (b) ->
             return b
 
     FULL_PATHS = true # required for incremental builds to work. prod doesnt use these so its ok
@@ -651,46 +653,61 @@ bundle = (watch, task_cb) ->
         'underscore': 'lodash'
 
     externals = ['hn-config']
-    getBowerDeps = ->
+    getBowerDeps = (ignoreNames=[], bowerPath='.') ->
+        pkg = require("./package.json")
+        shims = pkg['browserify-shim'] or {}
+        getChildOverrides = () ->
+            configs = glob.sync(bowerPath+"/**/bower.json")
+            overrides = {}
+            configs.forEach((cpath)->
+                _.extend(overrides, require(cpath).overrides or {})
+            )
+            _.extend(overrides, require(path.join(__dirname, "bower.json")).overrides or {})
+            return overrides
+
         ret = {}
-        _.each(require('wiredep')().packages, (dep, name) ->
-            return if name == 'hn-core'
+        _.each(require('wiredep')(overrides: getChildOverrides()).packages, (dep, name) ->
+            return if name in ignoreNames
             js = _.filter(dep.main, (file) -> path.extname(file) == '.js')
 #            css = _.filter(dep.main, (file) -> path.extname(file) == '.css')
-            if js.length == 1 and fs.existsSync(js[0])
-                relative = "./"+path.relative(__dirname, js[0])
-
+            src = js[0]
+            if src and fs.existsSync(src)
+                relative = "./"+path.relative(__dirname, src)
                 ret[name] = {
-                    path: js[0]
+                    path: src
                     used: false
+                    from: 'bower'
+                    noparse: not shims[name]
                     markUsed: ->
-                        ret[name].used = true
-                        _.each(_.keys(dep.dependencies), (dname) ->
-                            ret[dname]?.used = true
-                        )
+                        if not ret[name].used
+                            _.each(_.keys(dep.dependencies), (dname) ->
+                                ret[dname]?.markUsed()
+                            )
+                            ret[name].used = true
                     require: (b) ->
-                        console.log("common bunddle", name, relative)
                         b.require(relative, expose: name)
                 }
             else if js.length > 1
                 console.log("dunno how to require because it has multiple js files:", name)
         )
-        # TOOD: make this work, it will become more important as we have more npm stuff!!
-#        _.each(require("./package.json").dependencies, (v, name) ->
-#            ret[name] = {
-#                used: false
-#                markUsed: ->
-#                    ret[name].used = true
-#                require: (b) ->
-#                    b.require(name)
-#            }
-#        )
+        _.each(pkg.dependencies, (v, name) ->
+            return if name in ignoreNames
+            ret[name] = {
+                used: false
+                from: 'npm'
+                noparse: false
+                markUsed: ->
+                    ret[name].used = true
+                require: (b) ->
+                    b.require(name)
+            }
+        )
         return ret
 
-    deps = getBowerDeps()
+    deps = getBowerDeps(['hn-core', 'chai', 'sanitize.js', 'ngstorage'], BOWER_PATH)
 
     buildCommonBundle = () ->
-        if buildEnv == 'dev'
+        if buildEnv == 'dev' and false
             commonHash = local_config().common_bundle_hash or 0
             mod = (+fs.statSync("./package.json").mtime) / 1000 + (+fs.statSync("./bower.json").mtime) / 1000
             local_config(common_bundle_hash: mod)
@@ -701,22 +718,22 @@ bundle = (watch, task_cb) ->
         opts =
             fullPaths: FULL_PATHS
             noParse: []
+            debug: true
             cache: {}
             packageCache: {}
-            paths: ['./app/bower_components', './node_modules']
+            paths: ['./node_modules', './app/bower_components']
 
         requires = []
         _.each(deps, (dep, name) ->
             return if not dep.used
-            opts.noParse.push(dep.path)
+            if dep.noparse
+                opts.noParse.push(dep.path)
             requires.push(dep.require)
+            console.log("adding to vendor bundle: [#{dep.from}#{if dep.noparse then '/no parse' else ''}] #{name} - #{filesize(dep.path, true)}")
         )
 
 
         b = browserify(opts) #need to call this AFTER expose is called  so that it mutates opts!!
-
-        if buildEnv == 'dev'
-            b = browserifyInc(b, cacheFile: './.compiled/browserify_common_cache.json')
 
         _.each(requires, (r) -> r(b))
 
@@ -731,12 +748,15 @@ bundle = (watch, task_cb) ->
             .on('end', ->
                 console.log("common bundle finished:".green.underline + filesize('./.compiled/bundle/common.js'))
             )
+            .on('error', (err) ->
+                console.log(new gutil.PluginError("Browserify", err, showStack: yes).toString())
+            )
 
     bundler = watchify(
         browserify(
             entries: ['./app/app.coffee']
             extensions: ['.coffee']
-            paths: ['./app/', './app/bower_components/']
+            paths: ['./app/', './app/bower_components/', './node_modules']
             debug: buildEnv == 'dev'
             cache: {}
             packageCache: {}
@@ -747,7 +767,7 @@ bundle = (watch, task_cb) ->
                 if vendorDep
                     vendorDep.markUsed()
                     return false #same as adding to 'externals'
-                return true
+                return id not in externals
         )
         .transform(partialify.onlyAllow('html'))
         .transform((file) ->
@@ -807,9 +827,6 @@ bundle = (watch, task_cb) ->
             console.log("css bundle finished:".green.underline + filesize('./.compiled/bundle/vendor.css'))
             task_cb()
         )
-    )
-    _.each(externals, (name) ->
-        bundler.external(name)
     )
     rebundle = (firstRun = false) ->
         console.log("gulpfile@812:", firstRun)
