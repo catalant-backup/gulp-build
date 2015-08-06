@@ -490,8 +490,8 @@ linkToCore = (dirname) ->
         fs.symlinkSync(path.join(__dirname, dirname), coreSubDir, "dir")
 
 # this is pretty hacky, oh well :P - also does it actually work? should test!
-linkToCore("./node_modules")
-linkToCore("./app/bower_components")
+#linkToCore("./node_modules")
+#linkToCore("./app/bower_components")
 
 getChildOverrides = (bowerPath) ->
     configs = glob.sync(bowerPath+"/**/bower.json")
