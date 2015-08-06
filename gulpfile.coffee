@@ -83,7 +83,6 @@ LOG_PROXY_HEADERS = false
 UGLIFY_DEV = false
 SERVE_MINFIED = false #serve dist, toggle to true, gulp build, then gulp webserver to see prod like stuffs
 buildEnv = 'dev'
-isProdBuild = false # Deprecated with buildEnv, left here temporarily for legacy purposes.
 cacheEnabled = false #to enable, in app console: apicache.enable() and .disable() .clear() .status()
 ravenDsn = ''
 
@@ -130,12 +129,9 @@ console.log("API cache ENABLED".green.underline) if cacheEnabled
 # Deprecated, use --buildenv argument instead, left here for legacy
 if '--prod' in process.argv
     buildEnv = 'prod'
-    isProdBuild = true
 
 if yargs.argv.buildenv
     buildEnv = yargs.argv.buildenv
-    if buildEnv in ['prod', 'demo']
-        isProdBuild = true
 
 if '--ugly' in process.argv
     UGLIFY_DEV = true
@@ -480,6 +476,22 @@ gulp.task "webserver", (cb) ->
     app.listen(config.dev_server.port, config.dev_server.host)
     console.log("listening on ", config.dev_server.port)
 
+linkToCore = (dirname) ->
+    coreDir = path.join(__dirname, './app/bower_components/hn-core')
+    coreDirReal =  fs.realpathSync(coreDir)
+    coreSymlinked = coreDirReal != coreDir
+    coreSubDir = path.join(coreDirReal, dirname)
+    try
+        if fs.existsSync(fs.readlinkSync(coreSubDir))
+            fs.unlinkSync(coreSubDir)
+    catch e
+
+    if coreSymlinked
+        fs.symlinkSync(path.join(__dirname, dirname), coreSubDir, "dir")
+
+# this is pretty hacky, oh well :P - also does it actually work? should test!
+linkToCore("./node_modules")
+linkToCore("./app/bower_components")
 
 getChildOverrides = (bowerPath) ->
     configs = glob.sync(bowerPath+"/**/bower.json")
@@ -489,18 +501,6 @@ getChildOverrides = (bowerPath) ->
     )
     _.extend(overrides, require(path.join(__dirname, "bower.json")).overrides or {})
     return overrides
-
-getBowerPackageNames = (filterFn) ->
-    coreDeps = _.keys(require(path.join(__dirname, './app/bower_components/hn-core/bower.json')).dependencies)
-    return _.filter(_.unique(_.keys(require('./bower.json').dependencies).concat(coreDeps)), filterFn)
-
-getNPMPackageNames = ->
-    packageManifest = {}
-    try
-        packageManifest = require('./package.json')
-    catch e
-        # does not have a package.json manifest
-    return _.keys(packageManifest.dependencies) or []
 
 getThemes = () ->
     try
@@ -540,7 +540,7 @@ sassStream = (file, theme, vendorCss) ->
             './node_modules/',
         ]
         precision: 8
-        sourceMap: not isProdBuild #"./compiled/bundle/styles.css.map"
+        sourceMap: buildEnv == 'dev' #"./compiled/bundle/styles.css.map"
         sourceMapContents: false
         sourceMapEmbed: true
         sourceMapRoot: "."
@@ -650,57 +650,78 @@ bundle = (watch, task_cb) ->
     aliases =
         'underscore': 'lodash'
 
+    externals = ['hn-config']
+    getBowerDeps = ->
+        ret = {}
+        _.each(require('wiredep')().packages, (dep, name) ->
+            return if name == 'hn-core'
+            js = _.filter(dep.main, (file) -> path.extname(file) == '.js')
+#            css = _.filter(dep.main, (file) -> path.extname(file) == '.css')
+            if js.length == 1 and fs.existsSync(js[0])
+                relative = "./"+path.relative(__dirname, js[0])
 
-    externals = []
-    buildCommonBundle = ->
+                ret[name] = {
+                    path: js[0]
+                    used: false
+                    markUsed: ->
+                        ret[name].used = true
+                        _.each(_.keys(dep.dependencies), (dname) ->
+                            ret[dname]?.used = true
+                        )
+                    require: (b) ->
+                        console.log("common bunddle", name, relative)
+                        b.require(relative, expose: name)
+                }
+            else if js.length > 1
+                console.log("dunno how to require because it has multiple js files:", name)
+        )
+        # TOOD: make this work, it will become more important as we have more npm stuff!!
+#        _.each(require("./package.json").dependencies, (v, name) ->
+#            ret[name] = {
+#                used: false
+#                markUsed: ->
+#                    ret[name].used = true
+#                require: (b) ->
+#                    b.require(name)
+#            }
+#        )
+        return ret
+
+    deps = getBowerDeps()
+
+    buildCommonBundle = () ->
+        if buildEnv == 'dev'
+            commonHash = local_config().common_bundle_hash or 0
+            mod = (+fs.statSync("./package.json").mtime) / 1000 + (+fs.statSync("./bower.json").mtime) / 1000
+            local_config(common_bundle_hash: mod)
+            if mod == commonHash
+                console.log("common bundle rebuild not required".green.underline)
+                return
+
         opts =
             fullPaths: FULL_PATHS
             noParse: []
             cache: {}
             packageCache: {}
+            paths: ['./app/bower_components', './node_modules']
 
-        expose = (arr) ->
-            return _.map(arr, (name) ->
-                resolved = bowerResolve.fastReadSync(name)
-                relative = "./"+path.relative(__dirname, resolved)
-
-                if fs.existsSync(resolved)
-#                    console.log('"'+name+"\":\""+relative+"\",")
-                    externals.push(relative)
-                    opts.noParse.push(resolved)
-                    return (b) ->
-                        b.require(resolved, expose: name)
-                else
-                    return ->
-            )
-
-        registerFunctions = expose(getBowerPackageNames((name) ->
-            if name.indexOf("hn-") > -1
-                f = path.join(__dirname, './app/bower_components/', name)
-                # put our stuff in the common bundle when it IS NOT a symlink
-                # otherwise, put into app bundle which has a watch on it.
-                return fs.realpathSync(f) == f #include in common if not symlink
-            if name == 'chai'
-                return false # this thing sucks
-            return true
-        ))
-        b = browserify(opts) #need to call this AFTER expose is called  so that it mutates opts!!
-        if not isProdBuild
-            b = browserifyInc(b, cacheFile: './.compiled/browserify_common_cache.json')
-        _.each(glob.sync("./app/bower_components/**/*.+(html|scss)"), (fn) ->
-            fn = path.join(__dirname, fn)
-            opts.noParse.push(fn)
+        requires = []
+        _.each(deps, (dep, name) ->
+            return if not dep.used
+            opts.noParse.push(dep.path)
+            requires.push(dep.require)
         )
-        _.each(registerFunctions, (fn) -> fn(b))
+
+
+        b = browserify(opts) #need to call this AFTER expose is called  so that it mutates opts!!
+
+        if buildEnv == 'dev'
+            b = browserifyInc(b, cacheFile: './.compiled/browserify_common_cache.json')
+
+        _.each(requires, (r) -> r(b))
 
         b.require(path.join(__dirname, '.compiled', 'config.js'), expose: 'hn-config')
-        b.require('jquery')
-        b.require('moment')
-        b.require('angular')
-        b.require('lodash')
-        b.require('js-base64')
 
-        externals = externals.concat(['hn-config', 'moment', 'angular', 'lodash', 'jquery', 'js-base64'])
         b.bundle()
             .pipe(source('./app/common.js'))
             .on('error', gutil.log.bind(gutil, 'Browserify Error'))
@@ -711,18 +732,22 @@ bundle = (watch, task_cb) ->
                 console.log("common bundle finished:".green.underline + filesize('./.compiled/bundle/common.js'))
             )
 
-    buildCommonBundle()
-
     bundler = watchify(
         browserify(
             entries: ['./app/app.coffee']
             extensions: ['.coffee']
-            paths: ['./app/', './app/bower_components']
-            debug: not isProdBuild
+            paths: ['./app/', './app/bower_components/']
+            debug: buildEnv == 'dev'
             cache: {}
             packageCache: {}
             fullPaths: FULL_PATHS
             bundleExternal: true
+            filter: (id) ->
+                vendorDep = deps[id]
+                if vendorDep
+                    vendorDep.markUsed()
+                    return false #same as adding to 'externals'
+                return true
         )
         .transform(partialify.onlyAllow('html'))
         .transform((file) ->
@@ -765,14 +790,14 @@ bundle = (watch, task_cb) ->
         .transform(coffeeify)
         .transform(aliasify,
             aliases: aliases
-            verbose: not isProdBuild
+            verbose: buildEnv == 'dev'
         )
         .transform((file) ->
             return through() if not (/\.coffee|app\/modules|app\/components/i).test(file)
             return browserify_ngannotate(file, {ext: ['.coffee']})
         )
     )
-    if isProdBuild
+    if buildEnv != 'dev'
         bundler.plugin(require('bundle-collapser/plugin'))
 
 
@@ -783,12 +808,11 @@ bundle = (watch, task_cb) ->
             task_cb()
         )
     )
-
-
     _.each(externals, (name) ->
         bundler.external(name)
     )
-    rebundle = (firstRun = true) ->
+    rebundle = (firstRun = false) ->
+        console.log("gulpfile@812:", firstRun)
         stream = bundler.bundle()
         stream
             .pipe(source('./app/app.js'))
@@ -798,6 +822,7 @@ bundle = (watch, task_cb) ->
             .pipe(gulp.dest('.compiled/bundle', {base: '.compiled'}))
             .on('end', ->
                 if firstRun
+                    buildCommonBundle()
                     injectBundle( ()->
                         console.log("app bundle finished:".green.underline + filesize('./.compiled/bundle/app.js'))
                     )
@@ -806,7 +831,7 @@ bundle = (watch, task_cb) ->
                 console.log(new gutil.PluginError("Browserify", err, showStack: yes).toString())
             )
 
-    rebundle()
+    rebundle(true)
     bundler.on('update', rebundle)
     return
 
