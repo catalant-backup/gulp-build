@@ -64,11 +64,9 @@ browserify_ngannotate = require('browserify-ngannotate')
 bowerResolve = require('bower-resolve')
 
 sassCssStream = require('sass-css-stream')
-#browserifyInc = require('browserify-incremental')
-filesize = (f, isAbsolute=false) ->
-    return "??" if not f
-    p = if isAbsolute then f else path.join(__dirname, f)
-    return " "+require('filesize')(fs.statSync(p).size)
+browserifyInc = require('browserify-incremental')
+filesize = (f) ->
+    return " "+require('filesize')(fs.statSync(path.join(__dirname, f)).size)
 
 SegfaultHandler = require('segfault-handler')
 SegfaultHandler.registerHandler()
@@ -85,6 +83,7 @@ LOG_PROXY_HEADERS = false
 UGLIFY_DEV = false
 SERVE_MINFIED = false #serve dist, toggle to true, gulp build, then gulp webserver to see prod like stuffs
 buildEnv = 'dev'
+isProdBuild = false # Deprecated with buildEnv, left here temporarily for legacy purposes.
 cacheEnabled = false #to enable, in app console: apicache.enable() and .disable() .clear() .status()
 ravenDsn = ''
 
@@ -131,9 +130,12 @@ console.log("API cache ENABLED".green.underline) if cacheEnabled
 # Deprecated, use --buildenv argument instead, left here for legacy
 if '--prod' in process.argv
     buildEnv = 'prod'
+    isProdBuild = true
 
 if yargs.argv.buildenv
     buildEnv = yargs.argv.buildenv
+    if buildEnv in ['prod', 'demo']
+        isProdBuild = true
 
 if '--ugly' in process.argv
     UGLIFY_DEV = true
@@ -243,6 +245,20 @@ injectBundle = (task_cb, theme) ->
         themeName = "app.css"
         themeType = "public-enterprise"
 
+    ###
+    NOTE: when doing a gulp build, the way that works is that themed html files
+    are not actually used. it builds the entire app starting with index.html (default theme)
+    it then copies from dist/index.html to .compiled/[theme domain].index.html and at the
+    same time replaces the block where the theme goes with the uncompled theme.css file
+    it also replaces the APP_TYPE_CLASS with the correct type for that theme, after that it
+    builds that file into dist.
+    The result of that operation is that only the theme.css gets compiled, the compiled js is reused
+
+    It would be better to change the process to inject the built js into the .compiled theme file and then
+    build the css
+
+    createThemedIndex is the function that does this stuff
+     ###
     sources = gulp.src([
         "./.compiled/bundle/*.map"
         "./.compiled/bundle/common.js"
@@ -478,22 +494,6 @@ gulp.task "webserver", (cb) ->
     app.listen(config.dev_server.port, config.dev_server.host)
     console.log("listening on ", config.dev_server.port)
 
-linkToCore = (dirname) ->
-    coreDir = path.join(__dirname, './app/bower_components/hn-core')
-    coreDirReal =  fs.realpathSync(coreDir)
-    coreSymlinked = coreDirReal != coreDir
-    coreSubDir = path.join(coreDirReal, dirname)
-    try
-        if fs.existsSync(fs.readlinkSync(coreSubDir))
-            fs.unlinkSync(coreSubDir)
-    catch e
-
-    if coreSymlinked
-        fs.symlinkSync(path.join(__dirname, dirname), coreSubDir, "dir")
-
-# this is pretty hacky, oh well :P - also does it actually work? should test!
-#linkToCore("./node_modules")
-#linkToCore("./app/bower_components")
 
 getChildOverrides = (bowerPath) ->
     configs = glob.sync(bowerPath+"/**/bower.json")
@@ -503,6 +503,18 @@ getChildOverrides = (bowerPath) ->
     )
     _.extend(overrides, require(path.join(__dirname, "bower.json")).overrides or {})
     return overrides
+
+getBowerPackageNames = (filterFn) ->
+    coreDeps = _.keys(require(path.join(__dirname, './app/bower_components/hn-core/bower.json')).dependencies)
+    return _.filter(_.unique(_.keys(require('./bower.json').dependencies).concat(coreDeps)), filterFn)
+
+getNPMPackageNames = ->
+    packageManifest = {}
+    try
+        packageManifest = require('./package.json')
+    catch e
+        # does not have a package.json manifest
+    return _.keys(packageManifest.dependencies) or []
 
 getThemes = () ->
     try
@@ -542,7 +554,7 @@ sassStream = (file, theme, vendorCss) ->
             './node_modules/',
         ]
         precision: 8
-        sourceMap: buildEnv == 'dev' #"./compiled/bundle/styles.css.map"
+        sourceMap: not isProdBuild #"./compiled/bundle/styles.css.map"
         sourceMapContents: false
         sourceMapEmbed: true
         sourceMapRoot: "."
@@ -644,7 +656,7 @@ buildStyles = (bundler, watch,  output, onDone) ->
 
 bundle = (watch, task_cb) ->
     if not watch
-        watchify = (b) ->
+        watchify = browserifyInc = (b) ->
             return b
 
     FULL_PATHS = true # required for incremental builds to work. prod doesnt use these so its ok
@@ -652,93 +664,57 @@ bundle = (watch, task_cb) ->
     aliases =
         'underscore': 'lodash'
 
-    externals = ['hn-config']
-    getBowerDeps = (ignoreNames=[], bowerPath='.') ->
-        pkg = require("./package.json")
-        shims = pkg['browserify-shim'] or {}
-        getChildOverrides = () ->
-            configs = glob.sync(bowerPath+"/**/bower.json")
-            overrides = {}
-            configs.forEach((cpath)->
-                _.extend(overrides, require(cpath).overrides or {})
-            )
-            _.extend(overrides, require(path.join(__dirname, "bower.json")).overrides or {})
-            return overrides
 
-        ret = {}
-        _.each(require('wiredep')(overrides: getChildOverrides()).packages, (dep, name) ->
-            return if name in ignoreNames
-            js = _.filter(dep.main, (file) -> path.extname(file) == '.js')
-#            css = _.filter(dep.main, (file) -> path.extname(file) == '.css')
-            src = js[0]
-            if src and fs.existsSync(src)
-                relative = "./"+path.relative(__dirname, src)
-                ret[name] = {
-                    path: src
-                    used: false
-                    from: 'bower'
-                    noparse: not shims[name]
-                    markUsed: ->
-                        if not ret[name].used
-                            _.each(_.keys(dep.dependencies), (dname) ->
-                                ret[dname]?.markUsed()
-                            )
-                            ret[name].used = true
-                    require: (b) ->
-                        b.require(relative, expose: name)
-                }
-            else if js.length > 1
-                console.log("dunno how to require because it has multiple js files:", name)
-        )
-        _.each(pkg.dependencies, (v, name) ->
-            return if name in ignoreNames
-            ret[name] = {
-                used: false
-                from: 'npm'
-                noparse: false
-                markUsed: ->
-                    ret[name].used = true
-                require: (b) ->
-                    b.require(name)
-            }
-        )
-        return ret
-
-    deps = getBowerDeps(['hn-core', 'chai', 'sanitize.js', 'ngstorage'], BOWER_PATH)
-
-    buildCommonBundle = () ->
-        if buildEnv == 'dev' and false
-            commonHash = local_config().common_bundle_hash or 0
-            mod = (+fs.statSync("./package.json").mtime) / 1000 + (+fs.statSync("./bower.json").mtime) / 1000
-            local_config(common_bundle_hash: mod)
-            if mod == commonHash
-                console.log("common bundle rebuild not required".green.underline)
-                return
-
+    externals = []
+    buildCommonBundle = ->
         opts =
             fullPaths: FULL_PATHS
             noParse: []
-            debug: true
             cache: {}
             packageCache: {}
-            paths: ['./node_modules', './app/bower_components']
 
-        requires = []
-        _.each(deps, (dep, name) ->
-            return if not dep.used
-            if dep.noparse
-                opts.noParse.push(dep.path)
-            requires.push(dep.require)
-            console.log("adding to vendor bundle: [#{dep.from}#{if dep.noparse then '/no parse' else ''}] #{name} - #{filesize(dep.path, true)}")
-        )
+        expose = (arr) ->
+            return _.map(arr, (name) ->
+                resolved = bowerResolve.fastReadSync(name)
+                relative = "./"+path.relative(__dirname, resolved)
 
+                if fs.existsSync(resolved)
+#                    console.log('"'+name+"\":\""+relative+"\",")
+                    externals.push(relative)
+                    opts.noParse.push(resolved)
+                    return (b) ->
+                        b.require(resolved, expose: name)
+                else
+                    return ->
+            )
 
+        registerFunctions = expose(getBowerPackageNames((name) ->
+            if name.indexOf("hn-") > -1
+                f = path.join(__dirname, './app/bower_components/', name)
+                # put our stuff in the common bundle when it IS NOT a symlink
+                # otherwise, put into app bundle which has a watch on it.
+                return fs.realpathSync(f) == f #include in common if not symlink
+            if name == 'chai'
+                return false # this thing sucks
+            return true
+        ))
         b = browserify(opts) #need to call this AFTER expose is called  so that it mutates opts!!
-
-        _.each(requires, (r) -> r(b))
+        if not isProdBuild
+            b = browserifyInc(b, cacheFile: './.compiled/browserify_common_cache.json')
+        _.each(glob.sync("./app/bower_components/**/*.+(html|scss)"), (fn) ->
+            fn = path.join(__dirname, fn)
+            opts.noParse.push(fn)
+        )
+        _.each(registerFunctions, (fn) -> fn(b))
 
         b.require(path.join(__dirname, '.compiled', 'config.js'), expose: 'hn-config')
+        b.require('jquery')
+        b.require('moment')
+        b.require('angular')
+        b.require('lodash')
+        b.require('js-base64')
 
+        externals = externals.concat(['hn-config', 'moment', 'angular', 'lodash', 'jquery', 'js-base64'])
         b.bundle()
             .pipe(source('./app/common.js'))
             .on('error', gutil.log.bind(gutil, 'Browserify Error'))
@@ -748,26 +724,19 @@ bundle = (watch, task_cb) ->
             .on('end', ->
                 console.log("common bundle finished:".green.underline + filesize('./.compiled/bundle/common.js'))
             )
-            .on('error', (err) ->
-                console.log(new gutil.PluginError("Browserify", err, showStack: yes).toString())
-            )
+
+    buildCommonBundle()
 
     bundler = watchify(
         browserify(
             entries: ['./app/app.coffee']
             extensions: ['.coffee']
-            paths: ['./app/', './app/bower_components/', './node_modules']
-            debug: buildEnv == 'dev'
+            paths: ['./app/', './app/bower_components']
+            debug: not isProdBuild
             cache: {}
             packageCache: {}
             fullPaths: FULL_PATHS
             bundleExternal: true
-            filter: (id) ->
-                vendorDep = deps[id]
-                if vendorDep
-                    vendorDep.markUsed()
-                    return false #same as adding to 'externals'
-                return id not in externals
         )
         .transform(partialify.onlyAllow('html'))
         .transform((file) ->
@@ -810,14 +779,14 @@ bundle = (watch, task_cb) ->
         .transform(coffeeify)
         .transform(aliasify,
             aliases: aliases
-            verbose: buildEnv == 'dev'
+            verbose: not isProdBuild
         )
         .transform((file) ->
             return through() if not (/\.coffee|app\/modules|app\/components/i).test(file)
             return browserify_ngannotate(file, {ext: ['.coffee']})
         )
     )
-    if buildEnv != 'dev'
+    if isProdBuild
         bundler.plugin(require('bundle-collapser/plugin'))
 
 
@@ -828,8 +797,12 @@ bundle = (watch, task_cb) ->
             task_cb()
         )
     )
-    rebundle = (firstRun = false) ->
-        console.log("gulpfile@812:", firstRun)
+
+
+    _.each(externals, (name) ->
+        bundler.external(name)
+    )
+    rebundle = (firstRun = true) ->
         stream = bundler.bundle()
         stream
             .pipe(source('./app/app.js'))
@@ -839,7 +812,6 @@ bundle = (watch, task_cb) ->
             .pipe(gulp.dest('.compiled/bundle', {base: '.compiled'}))
             .on('end', ->
                 if firstRun
-                    buildCommonBundle()
                     injectBundle( ()->
                         console.log("app bundle finished:".green.underline + filesize('./.compiled/bundle/app.js'))
                     )
@@ -848,7 +820,7 @@ bundle = (watch, task_cb) ->
                 console.log(new gutil.PluginError("Browserify", err, showStack: yes).toString())
             )
 
-    rebundle(true)
+    rebundle()
     bundler.on('update', rebundle)
     return
 
@@ -935,6 +907,10 @@ createThemedIndex = (from, theme) ->
 <!-- endbuild -->
 """
     )
+    result = result.replace(/(([ \t]*)<!--\s*theme_class:*(\S*)\s*-->)(\n|\r|.)*?(<!--\s*endtheme_class\s*-->)/gi, (str, a, b) ->
+        return str.replace(/(private|public)-enterprise/, theme.type)
+    )
+
     dest = path.join(COMPILE_PATH, theme.index)
     fs.writeFileSync(dest, result)
     return dest
@@ -1251,8 +1227,8 @@ gulp.task "build", (cb) ->
     runSequence(
         'clean:compiled'
         'clean:dist'
-        'images'
         'bower_images:dist'
+        'images'
         'make_config'
         'copy_extras'
         'bundle:dist'
