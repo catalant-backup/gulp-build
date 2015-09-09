@@ -242,6 +242,21 @@ gulp.task "clean:dist",  ->
     return gulp.src(DIST_PATH)
         .pipe(vinylPaths(del))
 
+gulp.task "npm_install_core",  (cb) ->
+    cwd = path.join(__dirname, './app/bower_components/hn-core/')
+    if not fs.existsSync(cwd)
+        gutil.log("could not find hn-core dir, make sure it exists:", cwd)
+        return cb(true)
+
+    require("child_process").exec("npm install", cwd: cwd, (err, stdout, stderr) ->
+        if err
+            gutil.log("npm err:", err)
+        else
+            gutil.log("stdout:", stdout) if stdout
+            gutil.log("stderr:", stderr) if stderr
+        cb(err)
+    )
+    return
 
 injectBundle = (task_cb, theme) ->
     target = gulp.src("./app/index.html")
@@ -1301,6 +1316,7 @@ gulp.task "default", (cb) ->
     runSequence(
         'clean:compiled'
         'bower_images:dev'
+        'npm_install_core'
         'make_config'
         'copy_extras'
         'bundle'
@@ -1312,6 +1328,7 @@ gulp.task "build", (cb) ->
         'clean:compiled'
         'clean:dist'
         'bower_images:dist'
+        'npm_install_core'
         'images'
         'make_config'
         'copy_extras'
