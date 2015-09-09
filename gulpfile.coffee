@@ -53,7 +53,7 @@ concat = require('gulp-concat')
 watchify = require('watchify')
 source = require('vinyl-source-stream')
 buffer = require('vinyl-buffer')
-_ = require('underscore')
+_ = require('lodash')
 ngClassify = require('ng-classify')
 through = require('through')
 parcelify = require('parcelify')
@@ -507,7 +507,8 @@ gulp.task "webserver", (cb) ->
             return res.json({success: success, key: key})
 
         gutil.log("api cache command: [#{cmd}] - key count:", _.keys(apicache).length)
-        return res.json({cacheEnabled: cacheEnabled, index: _.mapObject(apicache, (val, key) -> val.length)})
+        idx = _.keys(apicache) #_.mapObject(apicache, (val, key) -> val.length)
+        return res.json({cacheEnabled: cacheEnabled, index: idx})
     )
 
     app.all("/api/*", (req, res) ->
