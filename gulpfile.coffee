@@ -90,6 +90,7 @@ UGLIFY_DEV = false
 SERVE_MINFIED = false #serve dist, toggle to true, gulp build, then gulp webserver to see prod like stuffs
 buildEnv = 'dev'
 cacheEnabled = false #to enable, in app console: apicache.enable() and .disable() .clear() .status()
+cacheReadonly = false
 ravenDsn = ''
 
 bundler = null
@@ -152,6 +153,11 @@ if '--ugly' in process.argv
 if '--verbose' in process.argv
     LOG_PROXY_HEADERS = true
     gutil.log("====== verbose proxy header logging enabled ======".red.underline)
+
+if '--cache' in process.argv
+    cacheReadonly = true
+    cacheEnabled = true
+    gutil.log("====== cache enabled, set to readonly mode ======".red.underline)
 
 if yargs.argv.raven_dsn
     ravenDsn = yargs.argv.raven_dsn
@@ -478,13 +484,12 @@ gulp.task "webserver", (cb) ->
             _write.call(res, data)
 
         res.end = () ->
-            console.log("gulpfile@466 - status?:", res)
-            apicache = local_config().api_cache or apicache
-            if not apicache[cacheKey]
-                gutil.log("cache MISS: [#{cacheKey}]")
-                apicache[cacheKey] = buffer
-                console.log("gulpfile@470 - wrote::", apicache['/api/v1.0/user/context [GET]'])
-                local_config(api_cache: apicache)
+            if not cacheReadonly
+                apicache = local_config().api_cache or apicache
+                if not apicache[cacheKey]
+                    gutil.log("cache MISS: [#{cacheKey}]")
+                    apicache[cacheKey] = buffer
+                    local_config(api_cache: apicache)
             _end.call(res)
 
         next()
@@ -496,6 +501,9 @@ gulp.task "webserver", (cb) ->
             cacheEnabled = true
         if cmd == 'disable'
             cacheEnabled = false
+        if cmd == 'readonly'
+            cacheReadonly = not cacheReadonly
+            return res.json({cacheReadonly, cacheEnabled})
         if cmd == 'clear'
             apicache = {}
             local_config(api_cache: apicache)
@@ -508,7 +516,7 @@ gulp.task "webserver", (cb) ->
 
         gutil.log("api cache command: [#{cmd}] - key count:", _.keys(apicache).length)
         idx = _.keys(apicache) #_.mapObject(apicache, (val, key) -> val.length)
-        return res.json({cacheEnabled: cacheEnabled, index: idx})
+        return res.json({cacheEnabled, cacheReadonly, index: idx})
     )
 
     app.all("/api/*", (req, res) ->
