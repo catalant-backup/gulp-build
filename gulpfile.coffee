@@ -560,9 +560,12 @@ sassStream = (file, theme, vendorCss) ->
                     return Null
 
         importer: (url, fromFile) ->
+            if url.match(/^~(.*)$/) #ignore webpack notation for things in node_modules/bower
+                url = RegExp.$1
+
             if url.match(/\.css$/i)
                 if not vendorCss #themes dont pass this in
-                    return {contents: "", file: file}
+                    return {contents: ""}
 
                 file = path.join(__dirname, "./app/bower_components", url)
                 if not fs.existsSync(file)
@@ -585,7 +588,8 @@ sassStream = (file, theme, vendorCss) ->
                     console.log("SASS CSS Import Error:".red.underline
                         " cannot @import url: "
                         "[#{url}] from: [#{fromFile}] file not found: #{file}")
-            return
+            else
+                return {file: url}
     })
 
 buildStyles = (bundler, watch,  output, onDone) ->
