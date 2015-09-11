@@ -487,9 +487,11 @@ gulp.task "webserver", (cb) ->
             if not cacheReadonly
                 apicache = local_config().api_cache or apicache
                 if not apicache[cacheKey]
-                    gutil.log("cache MISS: [#{cacheKey}]")
-                    apicache[cacheKey] = buffer
-                    local_config(api_cache: apicache)
+                    try
+                        JSON.parse(buffer)
+                        gutil.log("cache MISS: [#{cacheKey}]")
+                        apicache[cacheKey] = buffer
+                        local_config(api_cache: apicache)
             _end.call(res)
 
         next()
